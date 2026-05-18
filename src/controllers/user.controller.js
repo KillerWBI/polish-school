@@ -42,8 +42,8 @@ const update = async (req, res) => {
     const user = await User.findByPk(req.params.id);
     if (!user) return res.status(404).json({ error: 'Пользователь не найден' });
 
-    const { name, email } = req.body;
-    await user.update({ name, email });
+    const { name } = req.body;
+    await user.update({ name });
 
     res.json({ data: { id: user.id, name: user.name, email: user.email, role: user.role } });
   } catch (err) {

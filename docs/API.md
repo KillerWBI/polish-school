@@ -14,9 +14,11 @@ Response format:
 
 | Method | Path | Auth | Role | Описание |
 |--------|------|------|------|----------|
-| POST | `/auth/register` | — | — | Регистрация (создаёт student) |
-| POST | `/auth/login` | — | — | Вход, возвращает token |
+| POST | `/auth/register` | — | — | Регистрация студента |
+| POST | `/auth/register-teacher` | — | — | Регистрация учителя (требует `teacherSecret`) |
+| POST | `/auth/login` | — | — | Вход, возвращает JWT |
 | GET | `/auth/me` | ✅ | any | Текущий пользователь |
+| PUT | `/auth/password` | ✅ | any | Смена пароля |
 
 ### POST /auth/register
 ```json
@@ -25,6 +27,18 @@ Response format:
 
 // Response 201
 { "data": { "token": "...", "user": { "id", "name", "email", "role": "student" } } }
+```
+
+### POST /auth/register-teacher
+Создаёт учителя. Требует `teacherSecret` совпадающий с `TEACHER_SECRET` в `.env`.  
+Использовать через Postman — не публичный эндпоинт.
+
+```json
+// Body
+{ "name": "Учитель", "email": "teacher@mail.com", "password": "пароль", "teacherSecret": "..." }
+
+// Response 201
+{ "data": { "token": "...", "user": { "id", "name", "email", "role": "teacher" } } }
 ```
 
 ### POST /auth/login
@@ -36,10 +50,13 @@ Response format:
 { "data": { "token": "...", "user": { "id", "name", "email", "role" } } }
 ```
 
-### GET /auth/me
+### PUT /auth/password
 ```json
+// Body
+{ "currentPassword": "старый", "newPassword": "новый" }
+
 // Response 200
-{ "data": { "id", "name", "email", "role" } }
+{ "data": { "message": "Пароль изменён" } }
 ```
 
 ---
@@ -50,7 +67,7 @@ Response format:
 |--------|------|------|------|----------|
 | GET | `/users` | ✅ | teacher | Список всех студентов |
 | GET | `/users/:id` | ✅ | teacher / own | Профиль пользователя |
-| PUT | `/users/:id` | ✅ | teacher / own | Обновить имя/email |
+| PUT | `/users/:id` | ✅ | teacher / own | Обновить имя (email не меняется) |
 
 ### GET /users
 ```json
@@ -60,8 +77,8 @@ Response format:
 
 ### PUT /users/:id
 ```json
-// Body (любое поле опционально)
-{ "name": "Новое имя", "email": "new@mail.com" }
+// Body — только name; email изменить нельзя
+{ "name": "Новое имя" }
 ```
 
 ---
@@ -70,13 +87,14 @@ Response format:
 
 | Method | Path | Auth | Role | Описание |
 |--------|------|------|------|----------|
-| GET | `/groups` | ✅ | teacher/student | Список групп (teacher — все свои, student — свои) |
+| GET | `/groups` | ✅ | teacher/student | Список групп (teacher — все свои; student — свои) |
 | POST | `/groups` | ✅ | teacher | Создать группу |
 | GET | `/groups/:id` | ✅ | teacher / member | Группа + список студентов |
 | PUT | `/groups/:id` | ✅ | teacher | Редактировать группу |
 | DELETE | `/groups/:id` | ✅ | teacher | Удалить группу |
 | POST | `/groups/:id/students` | ✅ | teacher | Добавить студента |
 | DELETE | `/groups/:id/students/:studentId` | ✅ | teacher | Убрать студента |
+| POST | `/groups/:id/generate-lessons` | ✅ | teacher | Массовая генерация уроков по расписанию |
 
 ### POST /groups
 ```json
@@ -99,14 +117,30 @@ Response format:
 { "studentId": "uuid-студента" }
 ```
 
+### POST /groups/:id/generate-lessons
+Создаёт записи `Lesson` для каждого слота `Group.schedule` в диапазоне `[from, to]`.  
+Идемпотентно: дубли по `(groupId, date, time)` не создаются — повторный вызов безопасен.  
+Максимальный диапазон: 365 дней.
+
+```json
+// Body
+{ "from": "2026-05-18", "to": "2026-06-15" }
+
+// Response 200
+{ "data": { "created": 9, "lessons": [{ "id", "groupId", "date", "time" }] } }
+```
+
 ---
 
 ## Lessons (групповые уроки)
 
+Все уроки — одинаковые записи независимо от способа создания (массово или вручную).  
+Любой урок можно отдельно редактировать или удалить.
+
 | Method | Path | Auth | Role | Описание |
 |--------|------|------|------|----------|
-| GET | `/lessons` | ✅ | teacher/student | Уроки (teacher — все своих групп, student — своих групп) |
-| POST | `/lessons` | ✅ | teacher | Создать урок |
+| GET | `/lessons` | ✅ | teacher/student | Уроки (teacher — все своих групп; student — своих групп) |
+| POST | `/lessons` | ✅ | teacher | Создать одиночный урок |
 | GET | `/lessons/:id` | ✅ | teacher / member | Урок + материалы |
 | PUT | `/lessons/:id` | ✅ | teacher | Редактировать |
 | DELETE | `/lessons/:id` | ✅ | teacher | Удалить |
@@ -131,26 +165,88 @@ Response format:
 
 ---
 
-## Individual Lessons (индивидуальные уроки)
+## Individual Courses (расписание индивидуальных занятий)
+
+Контракт между учителем и студентом: расписание + цена + ссылка.  
+Из него генерируются `IndividualLesson` по тому же принципу, что `Group` → `Lesson`.
 
 | Method | Path | Auth | Role | Описание |
 |--------|------|------|------|----------|
-| GET | `/individual-lessons` | ✅ | teacher/student | Список (teacher — все свои, student — свои) |
-| POST | `/individual-lessons` | ✅ | teacher | Создать |
+| GET | `/individual-courses` | ✅ | teacher/student | Список (teacher: свои; student: свои) |
+| POST | `/individual-courses` | ✅ | teacher | Создать курс |
+| GET | `/individual-courses/:id` | ✅ | teacher / own student | Курс |
+| PUT | `/individual-courses/:id` | ✅ | teacher | Редактировать |
+| DELETE | `/individual-courses/:id` | ✅ | teacher | Удалить (уроки остаются с `individualCourseId = null`) |
+| POST | `/individual-courses/:id/generate-lessons` | ✅ | teacher | Массовая генерация уроков |
+
+### POST /individual-courses
+```json
+// Body
+{
+  "studentId": "uuid",
+  "name": "Анна — Польский B1",
+  "schedule": [{ "day": 2, "time": "17:00" }],
+  "lessonLink": "https://zoom.us/j/yyy",
+  "pricePerLesson": 500
+}
+
+// Response 201
+{ "data": { "id", "teacherId", "studentId", "name", "schedule", "lessonLink", "pricePerLesson" } }
+```
+
+### POST /individual-courses/:id/generate-lessons
+Идемпотентно. Дубли по `(individualCourseId, date, time)` не создаются.  
+Сгенерированные уроки наследуют `teacherId`, `studentId`, `lessonLink`, `pricePerLesson` из курса.  
+Максимальный диапазон: 365 дней.
+
+```json
+// Body
+{ "from": "2026-05-18", "to": "2026-06-15" }
+
+// Response 200
+{ "data": { "created": 4, "lessons": [...] } }
+```
+
+---
+
+## Individual Lessons (индивидуальные уроки)
+
+Отдельная запись урока — создаётся вручную или автоматически через `generate-lessons` курса.  
+Любой урок можно отдельно редактировать или удалить.
+
+| Method | Path | Auth | Role | Описание |
+|--------|------|------|------|----------|
+| GET | `/individual-lessons` | ✅ | teacher/student | Список (teacher: свои; student: свои) |
+| POST | `/individual-lessons` | ✅ | teacher | Создать разовый урок |
 | GET | `/individual-lessons/:id` | ✅ | teacher / own student | Урок |
 | PUT | `/individual-lessons/:id` | ✅ | teacher | Редактировать |
 | DELETE | `/individual-lessons/:id` | ✅ | teacher | Удалить |
 
 ### POST /individual-lessons
 ```json
-// Body
+// Body — individualCourseId необязателен (null для разовых уроков)
 {
   "studentId": "uuid",
+  "individualCourseId": null,
   "date": "2026-05-21",
   "time": "17:00",
   "topic": "Подготовка к экзамену",
+  "description": "Работа над ошибками",
   "lessonLink": "https://zoom.us/j/yyy",
-  "pricePerLesson": 500
+  "pricePerLesson": 500,
+  "materials": [
+    { "type": "link", "url": "https://...", "title": "Упражнения" }
+  ]
+}
+```
+
+### PUT /individual-lessons/:id
+```json
+// Body — любое поле опционально
+{
+  "topic": "Новая тема",
+  "time": "18:00",
+  "materials": [{ "type": "text", "content": "Правило падежей" }]
 }
 ```
 
@@ -165,13 +261,13 @@ Response format:
 | GET | `/homework/:id` | ✅ | teacher/student | Задание |
 | PUT | `/homework/:id` | ✅ | teacher | Редактировать |
 | DELETE | `/homework/:id` | ✅ | teacher | Удалить |
-| POST | `/homework/:id/submit` | ✅ | student | Сдать ДЗ (Cloudinary URL) |
+| POST | `/homework/:id/submit` | ✅ | **student** | Сдать ДЗ |
 | GET | `/homework/:id/submissions` | ✅ | teacher | Все сдачи по заданию |
 | PUT | `/homework/:id/submissions/:subId` | ✅ | teacher | Выставить оценку |
 
 ### POST /homework
 ```json
-// Body — одно из двух: lessonId или individualLessonId
+// Body — указывается одно из двух: lessonId или individualLessonId
 {
   "lessonId": "uuid",
   "description": "Упражнение 3, стр. 20",
@@ -181,7 +277,7 @@ Response format:
 
 ### POST /homework/:id/submit
 ```json
-// Body — fileUrl приходит уже готовым (загрузка на Cloudinary на фронте)
+// Body — fileUrl загружается на Cloudinary на фронте, бэкенд получает готовый URL
 { "fileUrl": "https://res.cloudinary.com/...", "comment": "Сделала все задания" }
 ```
 
@@ -189,6 +285,7 @@ Response format:
 ```json
 // Body
 { "grade": 5 }
+// Устанавливает status = 'graded'
 ```
 
 ---
@@ -198,12 +295,12 @@ Response format:
 | Method | Path | Auth | Role | Описание |
 |--------|------|------|------|----------|
 | GET | `/attendance` | ✅ | teacher/student | Журнал (student — только своя) |
-| POST | `/attendance` | ✅ | teacher | Выставить посещаемость для урока |
+| POST | `/attendance` | ✅ | teacher | Выставить посещаемость (bulk) |
 | PUT | `/attendance/:id` | ✅ | teacher | Исправить запись |
 
 ### POST /attendance
 ```json
-// Body — массовое выставление для урока
+// Body — указывается lessonId или individualLessonId
 {
   "lessonId": "uuid",
   "records": [
@@ -211,6 +308,12 @@ Response format:
     { "studentId": "uuid-2", "present": false }
   ]
 }
+```
+
+### PUT /attendance/:id
+```json
+// Body
+{ "present": true }
 ```
 
 ---
@@ -229,8 +332,8 @@ Response format:
 { "month": "2026-05" }
 
 // Логика: для каждого студента каждой группы учителя:
-// amount = кол-во присутствий за месяц × group.pricePerLesson
-// Создаёт или обновляет Payment записи
+//   amount = кол-во присутствий за месяц × group.pricePerLesson
+// findOrCreate: не дублирует при повторном вызове, обновляет amount если изменился
 
 // Response 200
 { "data": [{ "id", "studentId", "month", "amount", "paid", "paidAt" }] }
@@ -240,8 +343,8 @@ Response format:
 ```json
 // Body
 { "paid": true }
-// Если paid=true, устанавливает paidAt = now()
-// Если paid=false, обнуляет paidAt
+// paid=true  → paidAt = NOW()
+// paid=false → paidAt = null
 ```
 
 ---

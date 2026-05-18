@@ -2,6 +2,7 @@ const User = require('./User');
 const Group = require('./Group');
 const GroupStudent = require('./GroupStudent');
 const Lesson = require('./Lesson');
+const IndividualCourse = require('./IndividualCourse');
 const IndividualLesson = require('./IndividualLesson');
 const Homework = require('./Homework');
 const HomeworkSubmission = require('./HomeworkSubmission');
@@ -23,6 +24,14 @@ Group.hasMany(Lesson, { foreignKey: 'groupId' });
 // IndividualLesson ↔ User
 IndividualLesson.belongsTo(User, { foreignKey: 'teacherId', as: 'teacher' });
 IndividualLesson.belongsTo(User, { foreignKey: 'studentId', as: 'student' });
+
+// IndividualCourse ↔ User (teacher + student)
+IndividualCourse.belongsTo(User, { foreignKey: 'teacherId', as: 'teacher' });
+IndividualCourse.belongsTo(User, { foreignKey: 'studentId', as: 'student' });
+
+// IndividualCourse ↔ IndividualLesson (1 → many, nullable)
+IndividualCourse.hasMany(IndividualLesson, { foreignKey: 'individualCourseId' });
+IndividualLesson.belongsTo(IndividualCourse, { foreignKey: 'individualCourseId' });
 
 // Homework ↔ Lesson / IndividualLesson
 Homework.belongsTo(Lesson, { foreignKey: 'lessonId' });
@@ -47,6 +56,7 @@ module.exports = {
   Group,
   GroupStudent,
   Lesson,
+  IndividualCourse,
   IndividualLesson,
   Homework,
   HomeworkSubmission,

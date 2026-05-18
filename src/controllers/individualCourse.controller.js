@@ -1,0 +1,96 @@
+const { IndividualCourse, User } = require('../models');
+const { generateIndividualLessons } = require('../utils/lessonGenerator');
+
+const getAll = async (req, res) => {
+  try {
+    const where = req.user.role === 'teacher'
+      ? { teacherId: req.user.id }
+      : { studentId: req.user.id };
+    const courses = await IndividualCourse.findAll({ where });
+    res.json({ data: courses });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Ошибка получения курсов' });
+  }
+};
+
+const create = async (req, res) => {
+  try {
+    const { studentId, name, schedule, lessonLink, pricePerLesson } = req.body;
+    if (!studentId) return res.status(400).json({ error: 'studentId обязателен' });
+
+    const student = await User.findByPk(studentId);
+    if (!student || student.role !== 'student') {
+      return res.status(404).json({ error: 'Студент не найден' });
+    }
+
+    const course = await IndividualCourse.create({
+      teacherId: req.user.id,
+      studentId,
+      name: name || null,
+      schedule: schedule || [],
+      lessonLink: lessonLink || null,
+      pricePerLesson: pricePerLesson || 0,
+    });
+    res.status(201).json({ data: course });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Ошибка создания курса' });
+  }
+};
+
+const getOne = async (req, res) => {
+  try {
+    const course = await IndividualCourse.findByPk(req.params.id);
+    if (!course) return res.status(404).json({ error: 'Курс не найден' });
+
+    if (req.user.role === 'student' && course.studentId !== req.user.id) {
+      return res.status(403).json({ error: 'Доступ запрещён' });
+    }
+
+    res.json({ data: course });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Ошибка получения курса' });
+  }
+};
+
+const update = async (req, res) => {
+  try {
+    const course = await IndividualCourse.findByPk(req.params.id);
+    if (!course) return res.status(404).json({ error: 'Курс не найден' });
+
+    const { name, schedule, lessonLink, pricePerLesson } = req.body;
+    await course.update({ name, schedule, lessonLink, pricePerLesson });
+    res.json({ data: course });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Ошибка обновления курса' });
+  }
+};
+
+const remove = async (req, res) => {
+  try {
+    const course = await IndividualCourse.findByPk(req.params.id);
+    if (!course) return res.status(404).json({ error: 'Курс не найден' });
+    await course.destroy();
+    res.json({ data: { message: 'Курс удалён' } });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Ошибка удаления курса' });
+  }
+};
+
+const generateLessons = async (req, res) => {
+  try {
+    const { from, to } = req.body;
+    const created = await generateIndividualLessons({ courseId: req.params.id, from, to });
+    res.json({ data: { created: created.length, lessons: created } });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: 'Ошибка генерации уроков' });
+  }
+};
+
+module.exports = { getAll, create, getOne, update, remove, generateLessons };

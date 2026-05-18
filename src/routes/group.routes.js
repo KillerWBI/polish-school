@@ -10,5 +10,6 @@ router.put('/:id', auth, isTeacher, ctrl.update);
 router.delete('/:id', auth, isTeacher, ctrl.remove);
 router.post('/:id/students', auth, isTeacher, ctrl.addStudent);
 router.delete('/:id/students/:studentId', auth, isTeacher, ctrl.removeStudent);
+router.post('/:id/generate-lessons', auth, isTeacher, ctrl.generateLessons);
 
 module.exports = router;

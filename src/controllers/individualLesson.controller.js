@@ -15,12 +15,15 @@ const getAll = async (req, res) => {
 
 const create = async (req, res) => {
   try {
-    const { studentId, date, time, topic, description, lessonLink, pricePerLesson } = req.body;
+    const { studentId, date, time, topic, description, lessonLink, pricePerLesson, materials, individualCourseId } = req.body;
     if (!studentId || !date || !time) {
       return res.status(400).json({ error: 'studentId, date и time обязательны' });
     }
     const lesson = await IndividualLesson.create({
-      teacherId: req.user.id, studentId, date, time, topic, description, lessonLink, pricePerLesson,
+      teacherId: req.user.id,
+      studentId,
+      individualCourseId: individualCourseId || null,
+      date, time, topic, description, lessonLink, pricePerLesson, materials,
     });
     res.status(201).json({ data: lesson });
   } catch (err) {
@@ -49,8 +52,8 @@ const update = async (req, res) => {
   try {
     const lesson = await IndividualLesson.findByPk(req.params.id);
     if (!lesson) return res.status(404).json({ error: 'Урок не найден' });
-    const { date, time, topic, description, lessonLink, pricePerLesson } = req.body;
-    await lesson.update({ date, time, topic, description, lessonLink, pricePerLesson });
+    const { date, time, topic, description, lessonLink, pricePerLesson, materials } = req.body;
+    await lesson.update({ date, time, topic, description, lessonLink, pricePerLesson, materials });
     res.json({ data: lesson });
   } catch (err) {
     console.error(err);

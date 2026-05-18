@@ -4,68 +4,80 @@
 
 | Роль | Значение | Создаётся |
 |------|----------|-----------|
-| `teacher` | Учитель — полный доступ | Вручную в БД (или через seed) |
-| `student` | Студент | Через `POST /auth/register` |
-
-> На текущем этапе регистрация создаёт только `student`.  
-> Учитель создаётся вручную (через прямой INSERT или seed-скрипт).
+| `teacher` | Учитель — полный доступ | `POST /auth/register-teacher` (через Postman, требует `teacherSecret`) |
+| `student` | Студент | `POST /auth/register` (открытая регистрация) |
 
 ---
 
 ## Что может teacher
 
 ### Auth / Profile
-- Логин, просмотр и редактирование своего профиля
+- Регистрация (`register-teacher` + `teacherSecret`), логин
+- Просмотр своего профиля (`GET /auth/me`)
+- Редактирование имени (`PUT /users/:id`, только `name`)
+- Смена пароля (`PUT /auth/password`)
 
 ### Users
-- Видит список всех студентов
-- Редактирует любой профиль
+- Видит список всех студентов (`GET /users`)
+- Редактирует имя любого профиля (`PUT /users/:id`)
 
 ### Groups
 - Создаёт, редактирует, удаляет группы
 - Добавляет / убирает студентов из групп
+- Генерирует уроки по расписанию группы (`POST /groups/:id/generate-lessons`)
 
 ### Lessons
-- Создаёт, редактирует, удаляет уроки любой своей группы
-- Добавляет материалы к урокам (ссылки, файлы, текст)
+- Создаёт, редактирует, удаляет уроки
+- Добавляет материалы к урокам
+
+### Individual Courses
+- Создаёт, редактирует, удаляет контракты расписания с любым студентом
+- Генерирует индивидуальные уроки из расписания курса
 
 ### Individual Lessons
-- Создаёт, редактирует, удаляет индивидуальные уроки с любым студентом
+- Создаёт, редактирует, удаляет индивидуальные уроки (разовые или из серии)
 
 ### Homework
 - Создаёт, редактирует, удаляет задания
-- Просматривает все сдачи
-- Выставляет оценки
+- Просматривает все сдачи (`GET /homework/:id/submissions`)
+- Выставляет оценки (`PUT /homework/:id/submissions/:subId`)
 
 ### Attendance
-- Выставляет посещаемость (bulk) для любого урока
-- Исправляет записи
+- Выставляет посещаемость bulk (`POST /attendance`)
+- Исправляет записи (`PUT /attendance/:id`)
 
 ### Payments
-- Запускает расчёт оплаты за месяц
-- Отмечает оплату как выполненную
+- Запускает расчёт оплаты за месяц (`POST /payments/calculate`)
+- Отмечает оплату выполненной / отменяет (`PUT /payments/:id`)
 
 ---
 
 ## Что может student
 
 ### Auth / Profile
-- Регистрация, логин
-- Просмотр и редактирование только своего профиля
+- Открытая регистрация (`POST /auth/register`)
+- Логин
+- Просмотр только своего профиля
+- Редактирование только своего имени
+- Смена своего пароля
 
 ### Groups
 - Видит только группы, в которых состоит
-- Видит список студентов группы (через `GET /groups/:id`)
+- Видит список студентов группы (`GET /groups/:id`)
 
 ### Lessons
 - Видит уроки только своих групп (тема, дата, время, материалы, ссылка)
+- Не может открыть урок чужой группы
+
+### Individual Courses
+- Видит только свои курсы (где он `studentId`)
 
 ### Individual Lessons
 - Видит только свои индивидуальные уроки
 
 ### Homework
-- Видит задания (нужна доработка фильтрации — сейчас видит все)
-- Сдаёт ДЗ: загружает файл на Cloudinary на фронте, передаёт URL + комментарий
+- Видит задания (нужна доработка — сейчас `getAll` возвращает все)
+- Сдаёт ДЗ: `fileUrl` (Cloudinary, загружен на фронте) + comment
 - Не может сдать одно ДЗ дважды
 
 ### Attendance
@@ -81,32 +93,42 @@
 | Эндпоинт | teacher | student |
 |----------|---------|---------|
 | POST /auth/register | ✅ | ✅ |
+| POST /auth/register-teacher | ✅ (+ teacherSecret) | ✅ (+ teacherSecret) |
 | POST /auth/login | ✅ | ✅ |
 | GET /auth/me | ✅ | ✅ |
+| PUT /auth/password | ✅ | ✅ |
 | GET /users | ✅ | ❌ |
 | GET /users/:id | ✅ | только себя |
-| PUT /users/:id | ✅ | только себя |
-| GET /groups | ✅ все | ✅ свои |
+| PUT /users/:id | ✅ (только name) | только себя (только name) |
+| GET /groups | ✅ все свои | ✅ свои |
 | POST /groups | ✅ | ❌ |
 | GET /groups/:id | ✅ | ✅ если член |
 | PUT/DELETE /groups/:id | ✅ | ❌ |
 | POST /groups/:id/students | ✅ | ❌ |
 | DELETE /groups/:id/students/:id | ✅ | ❌ |
-| GET /lessons | ✅ все | ✅ своих групп |
-| POST/PUT/DELETE /lessons | ✅ | ❌ |
+| POST /groups/:id/generate-lessons | ✅ | ❌ |
+| GET /lessons | ✅ все своих групп | ✅ своих групп |
+| POST /lessons | ✅ | ❌ |
 | GET /lessons/:id | ✅ | ✅ если член группы |
-| GET /individual-lessons | ✅ все | ✅ свои |
-| POST/PUT/DELETE /individual-lessons | ✅ | ❌ |
+| PUT/DELETE /lessons/:id | ✅ | ❌ |
+| GET /individual-courses | ✅ все свои | ✅ свои |
+| POST /individual-courses | ✅ | ❌ |
+| GET /individual-courses/:id | ✅ | ✅ если свой |
+| PUT/DELETE /individual-courses/:id | ✅ | ❌ |
+| POST /individual-courses/:id/generate-lessons | ✅ | ❌ |
+| GET /individual-lessons | ✅ все свои | ✅ свои |
+| POST /individual-lessons | ✅ | ❌ |
 | GET /individual-lessons/:id | ✅ | ✅ если свой |
+| PUT/DELETE /individual-lessons/:id | ✅ | ❌ |
 | GET /homework | ✅ все | 🔶 все (нужна доработка) |
 | POST/PUT/DELETE /homework | ✅ | ❌ |
 | POST /homework/:id/submit | ❌ | ✅ |
 | GET /homework/:id/submissions | ✅ | ❌ |
 | PUT /homework/:id/submissions/:subId | ✅ | ❌ |
-| GET /attendance | ✅ все | ✅ свою |
+| GET /attendance | ✅ все | ✅ только свою |
 | POST /attendance | ✅ | ❌ |
 | PUT /attendance/:id | ✅ | ❌ |
-| GET /payments | ✅ все | ✅ свои |
+| GET /payments | ✅ все | ✅ только свои |
 | POST /payments/calculate | ✅ | ❌ |
 | PUT /payments/:id | ✅ | ❌ |
 
@@ -114,34 +136,16 @@
 
 ## Как создать учителя
 
-На текущем этапе — вручную в PostgreSQL:
+Через Postman — `POST /api/v1/auth/register-teacher`:
 
-```sql
-INSERT INTO "Users" (id, name, email, password, role, "createdAt", "updatedAt")
-VALUES (
-  gen_random_uuid(),
-  'Имя Учителя',
-  'teacher@school.com',
-  -- bcrypt hash пароля (rounds=10)
-  '$2b$10$...',
-  'teacher',
-  NOW(),
-  NOW()
-);
-```
-
-Или через seed-скрипт (добавить в план):
-```js
-// scripts/seed-teacher.js
-require('dotenv').config();
-const bcrypt = require('bcryptjs');
-const { User } = require('./src/models');
-
-async function seed() {
-  const hash = await bcrypt.hash('пароль_учителя', 10);
-  await User.create({ name: 'Учитель', email: 'teacher@school.com', password: hash, role: 'teacher' });
-  console.log('Учитель создан');
-  process.exit(0);
+```json
+{
+  "name": "Имя Учителя",
+  "email": "teacher@school.com",
+  "password": "пароль",
+  "teacherSecret": "<значение TEACHER_SECRET из .env>"
 }
-seed();
 ```
+
+`teacherSecret` должен совпадать с переменной `TEACHER_SECRET` в файле `.env`.  
+Возвращает `{ data: { token, user } }` — токен сразу готов к использованию.

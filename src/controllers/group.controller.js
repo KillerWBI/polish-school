@@ -1,4 +1,5 @@
 const { Group, GroupStudent, User } = require('../models');
+const { generateGroupLessons } = require('../utils/lessonGenerator');
 
 const getAll = async (req, res) => {
   try {
@@ -123,4 +124,18 @@ const removeStudent = async (req, res) => {
   }
 };
 
-module.exports = { getAll, create, getOne, update, remove, addStudent, removeStudent };
+// Массовая генерация уроков по расписанию группы в период [from, to]
+// Дубли по (groupId, date, time) не создаются — можно вызывать повторно.
+const generateLessons = async (req, res) => {
+  try {
+    const { from, to } = req.body;
+    const created = await generateGroupLessons({ groupId: req.params.id, from, to });
+    res.json({ data: { created: created.length, lessons: created } });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: 'Ошибка генерации уроков' });
+  }
+};
+
+module.exports = { getAll, create, getOne, update, remove, addStudent, removeStudent, generateLessons };

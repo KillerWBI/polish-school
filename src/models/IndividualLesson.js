@@ -15,6 +15,11 @@ const IndividualLesson = sequelize.define('IndividualLesson', {
     type: DataTypes.UUID,
     allowNull: false,
   },
+  // nullable: null для разового урока, FK на курс — для урока из серии
+  individualCourseId: {
+    type: DataTypes.UUID,
+    allowNull: true,
+  },
   date: {
     type: DataTypes.DATEONLY,
     allowNull: false,
@@ -39,6 +44,11 @@ const IndividualLesson = sequelize.define('IndividualLesson', {
     type: DataTypes.DECIMAL(10, 2),
     allowNull: false,
     defaultValue: 0,
+  },
+  // [{type: 'link'|'file'|'text', url?, content?, title?}]
+  materials: {
+    type: DataTypes.JSONB,
+    defaultValue: [],
   },
 });
 
