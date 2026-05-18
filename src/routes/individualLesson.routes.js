@@ -1,0 +1,12 @@
+const router = require('express').Router();
+const auth = require('../middleware/auth');
+const { isTeacher } = require('../middleware/role');
+const ctrl = require('../controllers/individualLesson.controller');
+
+router.get('/', auth, ctrl.getAll);
+router.post('/', auth, isTeacher, ctrl.create);
+router.get('/:id', auth, ctrl.getOne);
+router.put('/:id', auth, isTeacher, ctrl.update);
+router.delete('/:id', auth, isTeacher, ctrl.remove);
+
+module.exports = router;
