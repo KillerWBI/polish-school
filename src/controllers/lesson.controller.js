@@ -1,16 +1,18 @@
 const { Lesson, Group, GroupStudent } = require('../models');
 
+const groupInclude = { model: Group, attributes: ['id', 'name', 'lessonLink'] };
+
 const getAll = async (req, res) => {
   try {
     let lessons;
     if (req.user.role === 'teacher') {
       const groups = await Group.findAll({ where: { teacherId: req.user.id }, attributes: ['id'] });
       const groupIds = groups.map(g => g.id);
-      lessons = await Lesson.findAll({ where: { groupId: groupIds } });
+      lessons = await Lesson.findAll({ where: { groupId: groupIds }, include: [groupInclude] });
     } else {
       const memberships = await GroupStudent.findAll({ where: { studentId: req.user.id }, attributes: ['groupId'] });
       const groupIds = memberships.map(m => m.groupId);
-      lessons = await Lesson.findAll({ where: { groupId: groupIds } });
+      lessons = await Lesson.findAll({ where: { groupId: groupIds }, include: [groupInclude] });
     }
     res.json({ data: lessons });
   } catch (err) {
@@ -35,7 +37,7 @@ const create = async (req, res) => {
 
 const getOne = async (req, res) => {
   try {
-    const lesson = await Lesson.findByPk(req.params.id);
+    const lesson = await Lesson.findByPk(req.params.id, { include: [groupInclude] });
     if (!lesson) return res.status(404).json({ error: 'Урок не найден' });
 
     if (req.user.role === 'student') {

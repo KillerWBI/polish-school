@@ -1,11 +1,13 @@
-const { IndividualLesson } = require('../models');
+const { IndividualLesson, User } = require('../models');
+
+const studentInclude = { model: User, as: 'student', attributes: ['id', 'name'] };
 
 const getAll = async (req, res) => {
   try {
     const where = req.user.role === 'teacher'
       ? { teacherId: req.user.id }
       : { studentId: req.user.id };
-    const lessons = await IndividualLesson.findAll({ where });
+    const lessons = await IndividualLesson.findAll({ where, include: [studentInclude] });
     res.json({ data: lessons });
   } catch (err) {
     console.error(err);
@@ -34,7 +36,7 @@ const create = async (req, res) => {
 
 const getOne = async (req, res) => {
   try {
-    const lesson = await IndividualLesson.findByPk(req.params.id);
+    const lesson = await IndividualLesson.findByPk(req.params.id, { include: [studentInclude] });
     if (!lesson) return res.status(404).json({ error: 'Урок не найден' });
 
     if (req.user.role === 'student' && lesson.studentId !== req.user.id) {
