@@ -12,19 +12,26 @@ const getAll = async (req, res) => {
   }
 };
 
-// Рассчитывает оплату за месяц для всех студентов всех групп учителя
+// Рассчитывает оплату за месяц для всех студентов всех групп учителя.
 // Body: { month: "2026-05" }
+// Исправлен баг: сумма накапливается по всем группам в Map перед записью,
+// поэтому студент в нескольких группах получает корректный суммарный amount.
 const calculate = async (req, res) => {
   try {
     const { month } = req.body;
-    if (!month) return res.status(400).json({ error: 'month обязателен (формат: 2026-05)' });
+    if (!month || !/^\d{4}-\d{2}$/.test(month)) {
+      return res.status(400).json({ error: 'month обязателен в формате YYYY-MM' });
+    }
 
     const [year, mon] = month.split('-').map(Number);
     const startDate = `${year}-${String(mon).padStart(2, '0')}-01`;
-    const endDate = new Date(year, mon, 0).toISOString().slice(0, 10);
+    const endDate   = new Date(year, mon, 0).toISOString().slice(0, 10);
 
     const groups = await Group.findAll({ where: { teacherId: req.user.id } });
-    const results = [];
+
+    // Накапливаем итоговую сумму по studentId перед любой записью в БД.
+    // Ключ: studentId, значение: { amount, studentId }
+    const totals = new Map();
 
     for (const group of groups) {
       const memberships = await GroupStudent.findAll({ where: { groupId: group.id } });
@@ -39,17 +46,24 @@ const calculate = async (req, res) => {
           }],
         });
 
-        const amount = attendances.length * parseFloat(group.pricePerLesson);
+        const groupAmount = attendances.length * parseFloat(group.pricePerLesson);
+        const prev = totals.get(m.studentId) ?? 0;
+        totals.set(m.studentId, prev + groupAmount);
+      }
+    }
 
-        const [payment] = await Payment.findOrCreate({
-          where: { studentId: m.studentId, month },
-          defaults: { amount, paid: false },
-        });
+    // Одна запись / обновление на студента — без перетирания между группами
+    const results = [];
+    for (const [studentId, amount] of totals) {
+      const [payment, created] = await Payment.findOrCreate({
+        where: { studentId, month },
+        defaults: { amount, paid: false },
+      });
 
-        if (payment.amount !== amount) {
-          await payment.update({ amount });
-        }
-
+      if (!created && parseFloat(payment.amount) !== amount) {
+        await payment.update({ amount });
+        results.push(await payment.reload());
+      } else {
         results.push(payment);
       }
     }

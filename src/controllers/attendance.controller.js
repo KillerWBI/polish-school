@@ -11,18 +11,31 @@ const getAll = async (req, res) => {
   }
 };
 
-// Создаёт записи посещаемости для всех студентов урока
+// Создаёт или обновляет записи посещаемости (bulk).
 // Body: { lessonId?, individualLessonId?, records: [{studentId, present}] }
+// Исправлен баг: updateOnDuplicate гарантирует что повторный вызов обновит present
+// вместо создания дублей. Уникальный индекс (lessonId, studentId) в модели.
 const create = async (req, res) => {
   try {
     const { lessonId, individualLessonId, records } = req.body;
-    if (!records || !Array.isArray(records)) {
-      return res.status(400).json({ error: 'records обязателен' });
+    if (!records || !Array.isArray(records) || records.length === 0) {
+      return res.status(400).json({ error: 'records обязателен и не должен быть пустым' });
+    }
+    if (!lessonId && !individualLessonId) {
+      return res.status(400).json({ error: 'Нужен lessonId или individualLessonId' });
     }
 
-    const created = await Attendance.bulkCreate(
-      records.map(r => ({ lessonId, individualLessonId, studentId: r.studentId, present: r.present }))
-    );
+    const rows = records.map(r => ({
+      lessonId:           lessonId           ?? null,
+      individualLessonId: individualLessonId ?? null,
+      studentId: r.studentId,
+      present:   r.present ?? false,
+    }));
+
+    const created = await Attendance.bulkCreate(rows, {
+      updateOnDuplicate: ['present'],
+    });
+
     res.status(201).json({ data: created });
   } catch (err) {
     console.error(err);

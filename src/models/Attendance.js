@@ -24,6 +24,14 @@ const Attendance = sequelize.define('Attendance', {
     allowNull: false,
     defaultValue: false,
   },
+}, {
+  // Уникальные индексы защищают от дублей при bulkCreate.
+  // PostgreSQL считает NULL != NULL, поэтому строки с lessonId=NULL не конфликтуют
+  // между собой — что и нужно для инд. уроков.
+  indexes: [
+    { unique: true, fields: ['lessonId', 'studentId'],           name: 'attendance_lesson_student_unique' },
+    { unique: true, fields: ['individualLessonId', 'studentId'], name: 'attendance_indlesson_student_unique' },
+  ],
 });
 
 module.exports = Attendance;

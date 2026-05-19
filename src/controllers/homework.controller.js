@@ -1,9 +1,44 @@
-const { Homework, HomeworkSubmission, GroupStudent, Lesson } = require('../models');
+const { Homework, HomeworkSubmission, GroupStudent, Lesson, IndividualLesson } = require('../models');
+const { Op } = require('sequelize');
 
+// Исправлен баг: студент видит только ДЗ своих групп и инд. уроков.
+// Алгоритм:
+//   1. Найти groupId студента через GroupStudent
+//   2. Найти lessonId из этих групп
+//   3. Найти individualLessonId где studentId = req.user.id
+//   4. ДЗ у которых lessonId IN (шаг 2) OR individualLessonId IN (шаг 3)
 const getAll = async (req, res) => {
   try {
-    // TODO: фильтрация по группам студента / всё для учителя
-    const homeworks = await Homework.findAll();
+    if (req.user.role === 'teacher') {
+      const homeworks = await Homework.findAll();
+      return res.json({ data: homeworks });
+    }
+
+    // Шаги 1–3: собираем допустимые ID
+    const memberships = await GroupStudent.findAll({
+      where: { studentId: req.user.id },
+      attributes: ['groupId'],
+    });
+    const groupIds = memberships.map(m => m.groupId);
+
+    const [lessons, indLessons] = await Promise.all([
+      groupIds.length > 0
+        ? Lesson.findAll({ where: { groupId: { [Op.in]: groupIds } }, attributes: ['id'] })
+        : Promise.resolve([]),
+      IndividualLesson.findAll({ where: { studentId: req.user.id }, attributes: ['id'] }),
+    ]);
+
+    const lessonIds    = lessons.map(l => l.id);
+    const indLessonIds = indLessons.map(il => il.id);
+
+    // Если нет ни уроков, ни инд. уроков — пустой ответ
+    const orConditions = [];
+    if (lessonIds.length    > 0) orConditions.push({ lessonId:           { [Op.in]: lessonIds } });
+    if (indLessonIds.length > 0) orConditions.push({ individualLessonId: { [Op.in]: indLessonIds } });
+
+    if (orConditions.length === 0) return res.json({ data: [] });
+
+    const homeworks = await Homework.findAll({ where: { [Op.or]: orConditions } });
     res.json({ data: homeworks });
   } catch (err) {
     console.error(err);
@@ -78,7 +113,7 @@ const submit = async (req, res) => {
 
     const sub = await HomeworkSubmission.create({
       homeworkId: hw.id,
-      studentId: req.user.id,
+      studentId:  req.user.id,
       fileUrl,
       comment,
     });
@@ -106,6 +141,9 @@ const gradeSubmission = async (req, res) => {
     const sub = await HomeworkSubmission.findByPk(req.params.subId);
     if (!sub) return res.status(404).json({ error: 'Сдача не найдена' });
     const { grade } = req.body;
+    if (grade !== undefined && (!Number.isInteger(grade) || grade < 0 || grade > 100)) {
+      return res.status(400).json({ error: 'grade: целое число от 0 до 100' });
+    }
     await sub.update({ grade, status: 'graded' });
     res.json({ data: sub });
   } catch (err) {
