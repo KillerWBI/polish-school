@@ -9,9 +9,13 @@ async function start() {
     await sequelize.authenticate();
     console.log('БД подключена');
 
-    // sync({ alter: true }) для разработки — обновляет таблицы без сброса данных
-    await sequelize.sync({ alter: true });
-    console.log('Модели синхронизированы');
+    // В разработке — автосинхронизация схемы (alter); в production — только миграции (npm run db:migrate)
+    if (process.env.NODE_ENV !== 'production') {
+      await sequelize.sync({ alter: true });
+      console.log('Модели синхронизированы (dev)');
+    } else {
+      console.log('Production: синхронизация через миграции (npm run db:migrate)');
+    }
 
     app.listen(PORT, () => {
       console.log(`Сервер запущен на порту ${PORT}`);

@@ -1,10 +1,56 @@
-const { Attendance } = require('../models');
+const { Attendance, Lesson, Group } = require('../models');
+const { Op } = require('sequelize');
 
+// GET /attendance?lessonId=&groupId=&month=YYYY-MM&from=&to=
 const getAll = async (req, res) => {
   try {
     const where = req.user.role === 'student' ? { studentId: req.user.id } : {};
-    const records = await Attendance.findAll({ where });
-    res.json({ data: records });
+
+    if (req.query.lessonId)           where.lessonId = req.query.lessonId;
+    if (req.query.individualLessonId) where.individualLessonId = req.query.individualLessonId;
+    if (req.query.studentId && req.user.role === 'teacher') where.studentId = req.query.studentId;
+
+    // Фильтрация по groupId — через JOIN с Lesson
+    const lessonInclude = { model: Lesson, attributes: ['id', 'date', 'time', 'groupId'], required: false };
+
+    // Фильтрация по месяцу (YYYY-MM) или произвольному диапазону — через уроки
+    if (req.query.month || req.query.from || req.query.to) {
+      const lessonWhere = {};
+      if (req.query.groupId) lessonWhere.groupId = req.query.groupId;
+      if (req.query.month) {
+        const [y, m] = req.query.month.split('-').map(Number);
+        const start = `${y}-${String(m).padStart(2,'0')}-01`;
+        const end   = new Date(y, m, 0).toISOString().slice(0, 10);
+        lessonWhere.date = { [Op.between]: [start, end] };
+      } else {
+        if (req.query.from || req.query.to) {
+          lessonWhere.date = {};
+          if (req.query.from) lessonWhere.date[Op.gte] = req.query.from;
+          if (req.query.to)   lessonWhere.date[Op.lte] = req.query.to;
+        }
+      }
+      lessonInclude.where    = lessonWhere;
+      lessonInclude.required = true;
+    } else if (req.query.groupId) {
+      lessonInclude.where    = { groupId: req.query.groupId };
+      lessonInclude.required = true;
+    }
+
+    const page   = Math.max(1, parseInt(req.query.page)  || 1);
+    const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 50));
+    const offset = (page - 1) * limit;
+
+    const { count, rows } = await Attendance.findAndCountAll({
+      where,
+      include: [lessonInclude],
+      order: [[{ model: Lesson }, 'date', 'ASC']],
+      limit,
+      offset,
+      subQuery: false,
+      distinct: true,
+    });
+
+    res.json({ data: rows, pagination: { page, limit, total: count, pages: Math.ceil(count / limit) } });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Ошибка получения посещаемости' });
@@ -13,8 +59,6 @@ const getAll = async (req, res) => {
 
 // Создаёт или обновляет записи посещаемости (bulk).
 // Body: { lessonId?, individualLessonId?, records: [{studentId, present}] }
-// Исправлен баг: updateOnDuplicate гарантирует что повторный вызов обновит present
-// вместо создания дублей. Уникальный индекс (lessonId, studentId) в модели.
 const create = async (req, res) => {
   try {
     const { lessonId, individualLessonId, records } = req.body;

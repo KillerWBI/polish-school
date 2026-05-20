@@ -17,7 +17,7 @@ const HomeworkSubmission = sequelize.define('HomeworkSubmission', {
   },
   fileUrl: {
     type: DataTypes.STRING,
-    allowNull: false,
+    allowNull: true, // null для пустой сдачи (только комментарий)
   },
   comment: {
     type: DataTypes.TEXT,

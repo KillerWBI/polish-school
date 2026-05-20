@@ -2,29 +2,41 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { User } = require('../models');
 
+// Генерирует JWT для пользователя
+const signToken = (user) =>
+  jwt.sign(
+    { id: user.id, role: user.role },
+    process.env.JWT_SECRET,
+    { expiresIn: process.env.JWT_EXPIRES_IN }
+  );
+
 const register = async (req, res) => {
   try {
-    const { name, email, password } = req.body;
+    const { name, password } = req.body;
+    const email = req.body.email?.toLowerCase().trim();
+
     if (!name || !email || !password) {
       return res.status(400).json({ error: 'Имя, email и пароль обязательны' });
+    }
+    if (password.length < 6) {
+      return res.status(400).json({ error: 'Пароль минимум 6 символов' });
     }
 
     const existing = await User.findOne({ where: { email } });
     if (existing) {
-      return res.status(400).json({ error: 'Email уже занят' });
+      return res.status(400).json({ error: 'Аккаунт с таким email уже существует' });
     }
 
     const hash = await bcrypt.hash(password, 10);
     const user = await User.create({ name, email, password: hash, role: 'student' });
 
-    const token = jwt.sign(
-      { id: user.id, role: user.role },
-      process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRES_IN }
-    );
-
+    const token = signToken(user);
     res.status(201).json({ data: { token, user: { id: user.id, name: user.name, email: user.email, role: user.role } } });
   } catch (err) {
+    // Страховка: уникальный индекс на уровне БД тоже блокирует дубли
+    if (err.name === 'SequelizeUniqueConstraintError') {
+      return res.status(400).json({ error: 'Аккаунт с таким email уже существует' });
+    }
     console.error(err);
     res.status(500).json({ error: 'Ошибка регистрации' });
   }
@@ -32,7 +44,8 @@ const register = async (req, res) => {
 
 const login = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { password } = req.body;
+    const email = req.body.email?.toLowerCase().trim();
     if (!email || !password) {
       return res.status(400).json({ error: 'Email и пароль обязательны' });
     }
@@ -47,12 +60,7 @@ const login = async (req, res) => {
       return res.status(401).json({ error: 'Неверный email или пароль' });
     }
 
-    const token = jwt.sign(
-      { id: user.id, role: user.role },
-      process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRES_IN }
-    );
-
+    const token = signToken(user);
     res.json({ data: { token, user: { id: user.id, name: user.name, email: user.email, role: user.role } } });
   } catch (err) {
     console.error(err);
@@ -75,30 +83,33 @@ const me = async (req, res) => {
 
 const registerTeacher = async (req, res) => {
   try {
-    const { name, email, password, teacherSecret } = req.body;
+    const { name, password, teacherSecret } = req.body;
+    const email = req.body.email?.toLowerCase().trim();
+
     if (!name || !email || !password || !teacherSecret) {
       return res.status(400).json({ error: 'Все поля обязательны (name, email, password, teacherSecret)' });
     }
     if (teacherSecret !== process.env.TEACHER_SECRET) {
       return res.status(403).json({ error: 'Неверный секрет' });
     }
+    if (password.length < 6) {
+      return res.status(400).json({ error: 'Пароль минимум 6 символов' });
+    }
 
     const existing = await User.findOne({ where: { email } });
     if (existing) {
-      return res.status(400).json({ error: 'Email уже занят' });
+      return res.status(400).json({ error: 'Аккаунт с таким email уже существует' });
     }
 
     const hash = await bcrypt.hash(password, 10);
     const user = await User.create({ name, email, password: hash, role: 'teacher' });
 
-    const token = jwt.sign(
-      { id: user.id, role: user.role },
-      process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRES_IN }
-    );
-
+    const token = signToken(user);
     res.status(201).json({ data: { token, user: { id: user.id, name: user.name, email: user.email, role: user.role } } });
   } catch (err) {
+    if (err.name === 'SequelizeUniqueConstraintError') {
+      return res.status(400).json({ error: 'Аккаунт с таким email уже существует' });
+    }
     console.error(err);
     res.status(500).json({ error: 'Ошибка регистрации учителя' });
   }

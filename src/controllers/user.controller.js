@@ -2,11 +2,17 @@ const { User } = require('../models');
 
 const getAll = async (req, res) => {
   try {
-    const users = await User.findAll({
+    const page   = Math.max(1, parseInt(req.query.page)  || 1);
+    const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 50));
+    const offset = (page - 1) * limit;
+
+    const { count, rows } = await User.findAndCountAll({
       where: { role: 'student' },
       attributes: ['id', 'name', 'email', 'role'],
+      limit,
+      offset,
     });
-    res.json({ data: users });
+    res.json({ data: rows, pagination: { page, limit, total: count, pages: Math.ceil(count / limit) } });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Ошибка получения пользователей' });

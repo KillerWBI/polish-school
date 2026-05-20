@@ -1,223 +1,128 @@
-# Модули проекта
+# Модули проекта — Backend
 
 Каждый модуль = модель(и) + роут + контроллер.
 
 ---
 
-## 1. Auth — аутентификация
+## 1. Auth ✅
 
-**Статус:** ✅ Готов
-
-**Что умеет:**
-- `POST /auth/register` — создаёт студента, возвращает JWT
-- `POST /auth/register-teacher` — создаёт учителя с проверкой `teacherSecret` из `.env`. Используется через Postman.
-- `POST /auth/login` — bcrypt сравнение, возвращает JWT
+- `POST /auth/register` — email normalize, пароль ≥6, возвращает JWT
+- `POST /auth/register-teacher` — проверяет `teacherSecret` из `.env`
+- `POST /auth/login` — email normalize, bcrypt, rate limit 20/15мин, возвращает JWT
 - `GET /auth/me` — профиль текущего пользователя
-- `PUT /auth/password` — смена пароля (требует `currentPassword` + `newPassword`)
+- `PUT /auth/password` — смена пароля по `currentPassword`
 
-**Что нет:**
-- Восстановление пароля по email
-- Email-верификация
-- Refresh token
-
-**Файлы:**
-- `src/controllers/auth.controller.js`
-- `src/routes/auth.routes.js`
-- `src/models/User.js`
-- `src/middleware/auth.js`
-- `src/middleware/role.js`
+**Что нет:** восстановление пароля, email-верификация, refresh token  
+**Файлы:** `auth.controller.js`, `auth.routes.js`, `User.js`, `middleware/auth.js`, `middleware/role.js`
 
 ---
 
-## 2. Users — пользователи
+## 2. Users ✅
 
-**Статус:** ✅ Готов (базовый)
+- `GET /users` — список студентов `[teacher]`, пагинация
+- `GET /users/:id` — teacher видит всех, student — только себя
+- `PUT /users/:id` — только `name`
 
-**Что умеет:**
-- `GET /users` — список всех студентов [teacher]
-- `GET /users/:id` — профиль (teacher видит всех, student — только себя)
-- `PUT /users/:id` — обновить только `name` (email не редактируется, teacher или владелец)
-
-**Что нет:**
-- Загрузка аватара
-- Удаление аккаунта
-
-**Файлы:**
-- `src/controllers/user.controller.js`
-- `src/routes/user.routes.js`
+**Файлы:** `user.controller.js`, `user.routes.js`
 
 ---
 
-## 3. Groups — группы
+## 3. Groups ✅⚠️
 
-**Статус:** ✅ Готов
+- CRUD с ownership check на `update/delete` ✅
+- Студент получает только свои группы
+- `POST /groups/:id/students` + `DELETE /groups/:id/students/:studentId` — ⚠️ нет ownership check
+- `POST /groups/:id/generate-lessons { from, to }` — идемпотентно (findOrCreate по `groupId+date+time`)
 
-**Что умеет:**
-- CRUD группы (schedule JSONB `[{day, time}]`, постоянная Zoom-ссылка, `pricePerLesson`)
-- Список групп: teacher видит все свои, student — только в которых состоит
-- Добавление / удаление студентов
-- `POST /groups/:id/generate-lessons` — массовая генерация `Lesson` по `schedule` за период
-
-**Что нет:**
-- Архивирование группы (мягкое удаление)
-
-**Файлы:**
-- `src/controllers/group.controller.js`
-- `src/routes/group.routes.js`
-- `src/models/Group.js`
-- `src/models/GroupStudent.js`
-- `src/utils/lessonGenerator.js`
+**Файлы:** `group.controller.js`, `group.routes.js`, `Group.js`, `GroupStudent.js`, `lessonGenerator.js`
 
 ---
 
-## 4. Lessons — групповые уроки
+## 4. Lessons ✅
 
-**Статус:** ✅ Готов
+- CRUD с ownership check ✅
+- `GET /lessons?groupId=&from=&to=&date=` + сортировка `date ASC, time ASC`
+- Include: `Group { id, name, lessonLink }` + `Homeworks []`
+- Пагинация `?page=&limit=` ✅
 
-**Что умеет:**
-- Создание одиночного урока (`POST /lessons`)
-- Массовая генерация по `Group.schedule` через `POST /groups/:id/generate-lessons` (идемпотентно)
-- Материалы урока JSONB: `[{type: 'link'|'file'|'text', url?, content?, title?}]`
-- Ссылка на урок (переопределяет постоянную ссылку группы)
-- Teacher видит уроки всех своих групп; student — только своих групп
-- Студент не может открыть урок чужой группы
-- Любой урок редактируется / удаляется по отдельности независимо от способа создания
-
-**Что нет:**
-- Фильтрация `GET /lessons?groupId=&date=` по query-параметрам
-
-**Файлы:**
-- `src/controllers/lesson.controller.js`
-- `src/routes/lesson.routes.js`
-- `src/models/Lesson.js`
+**Файлы:** `lesson.controller.js`, `lesson.routes.js`, `Lesson.js`
 
 ---
 
-## 5. Individual Courses — расписание индивидуальных занятий
+## 5. Individual Courses ✅⚠️
 
-**Статус:** ✅ Готов
+- CRUD с ownership check на `update/delete` ✅
+- `getOne` — ⚠️ нет teacher ownership check (учитель видит чужие курсы)
+- `POST /individual-courses/:id/generate-lessons` — идемпотентно
 
-По структуре аналогичен `Group`: хранит контракт между учителем и студентом (расписание, цена, ссылка), из которого генерируются конкретные `IndividualLesson`.
-
-**Что умеет:**
-- CRUD курса (`name`, `schedule`, `lessonLink`, `pricePerLesson`)
-- `POST /individual-courses/:id/generate-lessons` — массовая генерация `IndividualLesson` (идемпотентно)
-- Teacher видит все свои курсы; student — только свои
-- При удалении курса уроки остаются (`individualCourseId` → `null`)
-
-**Файлы:**
-- `src/controllers/individualCourse.controller.js`
-- `src/routes/individualCourse.routes.js`
-- `src/models/IndividualCourse.js`
-- `src/utils/lessonGenerator.js`
+**Файлы:** `individualCourse.controller.js`, `individualCourse.routes.js`, `IndividualCourse.js`
 
 ---
 
-## 6. Individual Lessons — индивидуальные уроки
+## 6. Individual Lessons ✅
 
-**Статус:** ✅ Готов
+- CRUD с ownership check ✅
+- `GET /individual-lessons?from=&to=&date=&studentId=` + сортировка
+- Include: `student { id, name }` + `Homeworks []`
+- Пагинация ✅
 
-Конкретный урок — создаётся автоматически из `IndividualCourse.schedule` или вручную (без привязки к курсу).
-
-**Что умеет:**
-- Создание разового урока (`POST /individual-lessons`, `individualCourseId = null`)
-- Поля `teacherId`, `studentId`, `pricePerLesson`, `lessonLink` — своя цена и ссылка для каждого урока (можно override после генерации)
-- `materials` JSONB — те же типы, что у `Lesson`
-- Опциональный `individualCourseId` — FK на курс (null для разовых)
-- Teacher видит все свои уроки; student — только свои
-- Любой урок редактируется / удаляется по отдельности
-
-**Что нет:**
-- Фильтрация по студенту / дате
-
-**Файлы:**
-- `src/controllers/individualLesson.controller.js`
-- `src/routes/individualLesson.routes.js`
-- `src/models/IndividualLesson.js`
+**Файлы:** `individualLesson.controller.js`, `individualLesson.routes.js`, `IndividualLesson.js`
 
 ---
 
-## 7. Homework — домашние задания
+## 7. Homework 🔶
 
-**Статус:** ✅ Готов (базовый)
+- `getAll`: teacher — всё; student — только ДЗ своих групп + инд. уроков ✅
+- `submit` [student]: fileUrl (Cloudinary) + comment; защита от повторной сдачи
+- `grade`: валидация 0–100 ✅
+- ⚠️ `create/update/delete` — нет ownership check
+- ⚠️ `getSubmissions/gradeSubmission` — нет ownership check
 
-**Что умеет:**
-- Создание ДЗ — привязывается к `lessonId` **или** `individualLessonId` (одно обязательно)
-- `POST /homework/:id/submit` — только студент (guard `isStudent`); fileUrl из Cloudinary + comment
-- Проверка на повторную сдачу одного ДЗ
-- `GET /homework/:id/submissions` — все сдачи [teacher]
-- `PUT /homework/:id/submissions/:subId` — оценка (`grade`) + status → 'graded' [teacher]
-
-**Что нет:**
-- `getAll` не фильтрует по группам студента (возвращает все ДЗ — нужна доработка)
-- Статус `returned` (возвращено на доработку)
-
-**Файлы:**
-- `src/controllers/homework.controller.js`
-- `src/routes/homework.routes.js`
-- `src/models/Homework.js`
-- `src/models/HomeworkSubmission.js`
+**Файлы:** `homework.controller.js`, `homework.routes.js`, `Homework.js`, `HomeworkSubmission.js`
 
 ---
 
-## 8. Attendance — посещаемость
+## 8. Attendance 🔶
 
-**Статус:** ✅ Готов (базовый)
+- `POST` bulk create с `updateOnDuplicate: ['present']` ✅
+- Уникальные индексы `(lessonId, studentId)` и `(individualLessonId, studentId)` ✅
+- `GET?lessonId=&groupId=&month=YYYY-MM&from=&to=&studentId=` ✅
+- Пагинация ✅
+- ⚠️ `create/update` — нет ownership check
 
-**Что умеет:**
-- `POST /attendance` — bulk create: `{ lessonId?, individualLessonId?, records: [{studentId, present}] }`
-- `PUT /attendance/:id` — исправить `present`
-- Teacher видит всё; student — только свою посещаемость
-
-**Что нет:**
-- Фильтрация `GET /attendance?lessonId=&groupId=&month=`
-
-**Файлы:**
-- `src/controllers/attendance.controller.js`
-- `src/routes/attendance.routes.js`
-- `src/models/Attendance.js`
+**Файлы:** `attendance.controller.js`, `attendance.routes.js`, `Attendance.js`
 
 ---
 
-## 9. Payments — оплата
+## 9. Payments ✅
 
-**Статус:** ✅ Готов (базовый)
+- `calculate`: групповые + индивидуальные уроки ✅
+- `findOrCreate` — не дублирует при повторном вызове ✅
+- `update` — ownership check через `GroupStudent → Group.teacherId` ✅
+- Include `student { id, name, email }` + сортировка `month DESC` ✅
+- Пагинация ✅
+- ⚠️ N+1 в `calculate` (цикл по студентам)
 
-**Что умеет:**
-- `POST /payments/calculate` — для каждого студента каждой группы учителя: `amount = кол-во присутствий × pricePerLesson`; `findOrCreate` — не дублирует при повторном вызове
-- `PUT /payments/:id` — `{ paid: true }` → `paidAt = NOW()`; `{ paid: false }` → `paidAt = null`
-- Teacher видит все оплаты; student — только свои
-
-**Что нет:**
-- Учёт индивидуальных уроков в расчёте (сейчас только групповые)
-- `GET /payments/debt/:studentId` — долг студента
-
-**Файлы:**
-- `src/controllers/payment.controller.js`
-- `src/routes/payment.routes.js`
-- `src/models/Payment.js`
+**Файлы:** `payment.controller.js`, `payment.routes.js`, `Payment.js`
 
 ---
 
-## Утилиты
+## 10. Инфраструктура ✅
 
-### `src/utils/lessonGenerator.js`
+### Запуск
+- `development`: `sync({ alter: true })` — автосинхронизация схемы
+- `production`: только `sequelize.authenticate()`, схема через `npm run db:migrate`
 
+### Migrations
+- `.sequelizerc` → пути к конфигу и миграциям
+- `src/config/sequelize-config.js` — для sequelize-cli
+- `src/migrations/20260519000000-create-all-tables.js` — начальная миграция
+
+### Утилиты
 | Функция | Что делает |
 |---------|-----------|
-| `expandSchedule(schedule, from, to)` | Разворачивает JSONB-расписание в массив `{date, time}` за период |
-| `generateGroupLessons({ groupId, from, to })` | Создаёт `Lesson` записи, `findOrCreate` по `(groupId, date, time)` |
-| `generateIndividualLessons({ courseId, from, to })` | Создаёт `IndividualLesson` записи, `findOrCreate` по `(individualCourseId, date, time)` |
+| `expandSchedule(schedule, from, to)` | JSONB-расписание → массив `{date, time}` за период |
+| `generateGroupLessons({ groupId, from, to })` | `findOrCreate` по `(groupId, date, time)` |
+| `generateIndividualLessons({ courseId, from, to })` | `findOrCreate` по `(individualCourseId, date, time)` |
 
 Защита: `from > to` → 400; диапазон > 365 дней → 400.
-
----
-
-## Известные заглушки и TODO
-
-| Что | Где | Приоритет |
-|-----|-----|-----------|
-| `homework.getAll` не фильтрует по группам студента | homework.controller.js | Высокий |
-| Индивидуальные уроки не входят в расчёт Payment | payment.controller.js | Высокий |
-| Нет query-фильтров для `GET /lessons?groupId=&date=` | lesson.controller.js | Средний |
-| Нет фильтрации attendance по уроку / группе / месяцу | attendance.controller.js | Средний |

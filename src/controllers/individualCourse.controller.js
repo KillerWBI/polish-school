@@ -59,6 +59,7 @@ const update = async (req, res) => {
   try {
     const course = await IndividualCourse.findByPk(req.params.id);
     if (!course) return res.status(404).json({ error: 'Курс не найден' });
+    if (course.teacherId !== req.user.id) return res.status(403).json({ error: 'Доступ запрещён' });
 
     const { name, schedule, lessonLink, pricePerLesson } = req.body;
     await course.update({ name, schedule, lessonLink, pricePerLesson });
@@ -73,6 +74,8 @@ const remove = async (req, res) => {
   try {
     const course = await IndividualCourse.findByPk(req.params.id);
     if (!course) return res.status(404).json({ error: 'Курс не найден' });
+    if (course.teacherId !== req.user.id) return res.status(403).json({ error: 'Доступ запрещён' });
+
     await course.destroy();
     res.json({ data: { message: 'Курс удалён' } });
   } catch (err) {

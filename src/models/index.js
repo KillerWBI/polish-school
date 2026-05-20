@@ -14,12 +14,12 @@ Group.belongsTo(User, { foreignKey: 'teacherId', as: 'teacher' });
 User.hasMany(Group, { foreignKey: 'teacherId', as: 'teacherGroups' });
 
 // Group ↔ User (students) через GroupStudent
-Group.belongsToMany(User, { through: GroupStudent, foreignKey: 'groupId', as: 'students' });
+Group.belongsToMany(User, { through: GroupStudent, foreignKey: 'groupId', as: 'students', onDelete: 'CASCADE' });
 User.belongsToMany(Group, { through: GroupStudent, foreignKey: 'studentId', as: 'groups' });
 
 // Lesson ↔ Group
-Lesson.belongsTo(Group, { foreignKey: 'groupId' });
-Group.hasMany(Lesson, { foreignKey: 'groupId' });
+Lesson.belongsTo(Group, { foreignKey: 'groupId', onDelete: 'CASCADE' });
+Group.hasMany(Lesson, { foreignKey: 'groupId', onDelete: 'CASCADE' });
 
 // IndividualLesson ↔ User
 IndividualLesson.belongsTo(User, { foreignKey: 'teacherId', as: 'teacher' });
@@ -36,6 +36,8 @@ IndividualLesson.belongsTo(IndividualCourse, { foreignKey: 'individualCourseId' 
 // Homework ↔ Lesson / IndividualLesson
 Homework.belongsTo(Lesson, { foreignKey: 'lessonId' });
 Homework.belongsTo(IndividualLesson, { foreignKey: 'individualLessonId' });
+Lesson.hasMany(Homework, { foreignKey: 'lessonId' });
+IndividualLesson.hasMany(Homework, { foreignKey: 'individualLessonId' });
 
 // HomeworkSubmission ↔ Homework, User
 HomeworkSubmission.belongsTo(Homework, { foreignKey: 'homeworkId' });

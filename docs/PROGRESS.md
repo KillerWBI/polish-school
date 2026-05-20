@@ -1,92 +1,63 @@
-# Прогресс разработки
+# Прогресс разработки — Backend
 
 ## Легенда
 - ✅ Готово
-- 🔶 Есть заглушка / частично
-- ❌ Не начато
+- 🔴 Критическая проблема
+- 🟡 Есть, но с проблемой
 
 ---
 
-## Инфраструктура
+## Инфраструктура ✅
 
-| Задача | Статус | Заметка |
-|--------|--------|---------|
-| package.json + зависимости | ✅ | express, sequelize, pg, bcryptjs, jsonwebtoken, dotenv(x), nodemon |
-| .env файл (UTF-8) | ✅ | 8 переменных: PORT, NODE_ENV, JWT_SECRET, JWT_EXPIRES_IN, DB_URL, TEACHER_SECRET, CLOUDINARY_* |
-| src/config/database.js | ✅ | Sequelize + PostgreSQL, dotenv внутри файла |
-| src/app.js | ✅ | cors + json + 9 роутов + global error handler |
-| index.js | ✅ | authenticate + sync({ alter }) + listen |
-| npm run dev / npm start | ✅ | nodemon / node |
-| .gitignore | ✅ | node_modules/ + .env |
-| Подключение к БД (Railway) | ✅ | DB_URL → публичный proxy URL Railway |
-| Cloudinary credentials | ✅ | Заполнены в .env |
-
----
-
-## Модели
-
-| Модель | Создана | Ассоциации | Заметка |
-|--------|---------|------------|---------|
-| User | ✅ | ✅ | UUID PK, role ENUM('teacher','student') |
-| Group | ✅ | ✅ | schedule JSONB, pricePerLesson DECIMAL |
-| GroupStudent | ✅ | ✅ | junction, no timestamps |
-| Lesson | ✅ | ✅ | materials JSONB, lessonLink nullable override |
-| IndividualCourse | ✅ | ✅ | schedule JSONB, teacher + student FK, pricePerLesson |
-| IndividualLesson | ✅ | ✅ | individualCourseId nullable, materials JSONB, своя цена |
-| Homework | ✅ | ✅ | nullable lessonId / individualLessonId |
-| HomeworkSubmission | ✅ | ✅ | fileUrl, grade nullable, status ENUM('pending','graded') |
-| Attendance | ✅ | ✅ | nullable lessonId / individualLessonId |
-| Payment | ✅ | ✅ | month string "2026-05", paidAt nullable |
+| Задача | Статус |
+|--------|--------|
+| Express 5 + Sequelize 6 + PostgreSQL | ✅ |
+| JWT auth + bcrypt | ✅ |
+| CORS по `CLIENT_URL`, rate limit `/auth/login` | ✅ |
+| `sync({ alter: true })` только в development | ✅ |
+| sequelize-cli + начальная миграция | ✅ 2026-05-20 |
+| `npm run db:migrate` / `db:migrate:undo` | ✅ 2026-05-20 |
+| Пагинация `?page=&limit=` на всех `getAll` | ✅ 2026-05-20 |
+| 401 → CustomEvent → AuthContext (фронт) | ✅ 2026-05-20 |
 
 ---
 
-## Middleware
+## Модули
 
-| Файл | Статус | Что делает |
-|------|--------|-----------|
-| auth.js | ✅ | Проверяет JWT → req.user = { id, role } |
-| role.js | ✅ | isTeacher / isStudent guards (403 если не та роль) |
-
----
-
-## Утилиты
-
-| Файл | Статус | Что делает |
-|------|--------|-----------|
-| utils/lessonGenerator.js | ✅ | expandSchedule, generateGroupLessons, generateIndividualLessons |
-
----
-
-## Роуты и контроллеры
-
-| Модуль | Роут | Контроллер | Полнота |
-|--------|------|-----------|---------|
-| Auth | ✅ | ✅ | register, register-teacher, login, me, changePassword |
-| Users | ✅ | ✅ | list (students only), getOne, update (только name) |
-| Groups | ✅ | ✅ | CRUD + students + generate-lessons |
-| Lessons | ✅ | 🔶 | CRUD + генерация (нет query-фильтров) |
-| Individual Courses | ✅ | ✅ | CRUD + generate-lessons |
-| Individual Lessons | ✅ | 🔶 | CRUD + materials (нет query-фильтров) |
-| Homework | ✅ | 🔶 | CRUD + submit (isStudent) + submissions + grade; getAll не фильтрует |
-| Attendance | ✅ | 🔶 | bulk create + update (нет query-фильтров) |
-| Payments | ✅ | 🔶 | calculate (только групповые) + mark paid |
+| Модуль | Статус | Нерешённые проблемы |
+|--------|--------|---------------------|
+| Auth | ✅ | `registerTeacher` — нет проверки пароля ≥6 |
+| Users | ✅ | — |
+| Groups | 🟡 | `addStudent/removeStudent/getOne/generateLessons` — нет ownership check |
+| Lessons | ✅ | Запутанная WHERE логика в `getAll` (работает, но сложно читать) |
+| Individual Courses | 🟡 | `getOne/generateLessons` — нет ownership check |
+| Individual Lessons | ✅ | — |
+| Homework | 🔴 | `create/update/delete` — нет ownership; `getSubmissions/grade` — нет ownership; `getSubmissions` — нет include User |
+| Attendance | 🔴 | `create/update` — нет ownership check |
+| Payments | 🟡 | N+1 запросы в `calculate` |
 
 ---
 
-## Что доделать (MVP)
+## Задачи
 
-### Высокий приоритет
-- [ ] `homework.getAll` — фильтровать по группам студента (сейчас возвращает все ДЗ)
-- [ ] `payment.calculate` — включить индивидуальные уроки в расчёт
+### 🔴 Критично (безопасность)
+- [ ] `homework.create` — проверить `lessonId → Group.teacherId === req.user.id`
+- [ ] `homework.update/delete` — ownership через Lesson → Group
+- [ ] `homework.getSubmissions/gradeSubmission` — ownership check + include User (имя студента)
+- [ ] `attendance.create/update` — ownership через Lesson/IndividualLesson
+- [ ] `group.addStudent/removeStudent` — `group.teacherId === req.user.id`
 
-### Средний приоритет
-- [ ] Фильтры `GET /lessons?groupId=&date=`
-- [ ] Фильтры `GET /attendance?lessonId=&month=`
+### 🟡 Важно
+- [ ] `group.getOne/generateLessons` — teacher ownership check
+- [ ] `individualCourse.getOne/generateLessons` — teacher ownership check
+- [ ] `auth.registerTeacher` — `password.length < 6`
 
-### Низкий приоритет (после MVP)
-- [ ] Долг студента: `GET /payments/debt/:studentId`
-- [ ] Экспорт данных (посещаемость / оплата)
+### ⚪ Низкий приоритет
+- [ ] N+1 в `payment.calculate` — заменить на JOIN
+- [ ] Очистить `buildDateWhere` в `lesson.controller.js`
+- [ ] `GET /payments/debt/:studentId`
 - [ ] Refresh token
+- [ ] Экспорт PDF/Excel
 
 ---
 
@@ -94,11 +65,13 @@
 
 | Дата | Что сделано |
 |------|------------|
-| 2026-05-18 | Создана полная структура проекта: модели, роуты, контроллеры, middleware, config |
-| 2026-05-18 | Обновлён CLAUDE.md с точной архитектурой |
-| 2026-05-18 | Исправлена кодировка .env (UTF-16 → UTF-8), подключена реальная БД Railway |
-| 2026-05-18 | Созданы docs/ файлы |
-| 2026-05-18 | Добавлены `POST /auth/register-teacher` (TEACHER_SECRET) и `PUT /auth/password` |
-| 2026-05-18 | `PUT /users/:id` — только `name`, email не меняется |
-| 2026-05-18 | `POST /homework/:id/submit` — добавлен guard `isStudent` |
-| 2026-05-18 | Добавлены регулярные уроки: `IndividualCourse`, generate-lessons для групп и курсов, `src/utils/lessonGenerator.js`, `materials` JSONB и `individualCourseId` в `IndividualLesson` |
+| 2026-05-18 | Создана полная структура: модели, роуты, контроллеры, middleware |
+| 2026-05-18 | Подключена БД Railway, заполнены Cloudinary credentials |
+| 2026-05-18 | register-teacher, changePassword, IndividualCourse, generate-lessons |
+| 2026-05-19 | Исправлены 4 критических бага (payment, attendance дубли, homework фильтр, grade) |
+| 2026-05-19 | CORS + rate limit + ownership checks на update/delete всех модулей |
+| 2026-05-19 | Email normalize + password validation; фильтры по датам; сортировка |
+| 2026-05-19 | payment.calculate: индивидуальные уроки; ownership в payment.update |
+| 2026-05-20 | sequelize-cli миграции + npm scripts |
+| 2026-05-20 | Пагинация findAndCountAll на всех getAll |
+| 2026-05-20 | Полное ревью: зафиксированы ownership check issues (см. REVIEW.md) |

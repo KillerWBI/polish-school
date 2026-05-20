@@ -1,4 +1,4 @@
-const { Group, GroupStudent, User } = require('../models');
+const { Group, GroupStudent, User, Lesson, Homework, HomeworkSubmission, Attendance } = require('../models');
 const { generateGroupLessons } = require('../utils/lessonGenerator');
 
 const getAll = async (req, res) => {
@@ -65,6 +65,7 @@ const update = async (req, res) => {
   try {
     const group = await Group.findByPk(req.params.id);
     if (!group) return res.status(404).json({ error: 'Группа не найдена' });
+    if (group.teacherId !== req.user.id) return res.status(403).json({ error: 'Доступ запрещён' });
 
     const { name, schedule, lessonLink, pricePerLesson } = req.body;
     await group.update({ name, schedule, lessonLink, pricePerLesson });
@@ -79,6 +80,32 @@ const remove = async (req, res) => {
   try {
     const group = await Group.findByPk(req.params.id);
     if (!group) return res.status(404).json({ error: 'Группа не найдена' });
+    if (group.teacherId !== req.user.id) return res.status(403).json({ error: 'Доступ запрещён' });
+
+    // Получаем ID всех уроков группы
+    const lessons = await Lesson.findAll({ where: { groupId: group.id }, attributes: ['id'] });
+    const lessonIds = lessons.map(l => l.id);
+
+    if (lessonIds.length > 0) {
+      // Удаляем посещаемость уроков
+      await Attendance.destroy({ where: { lessonId: lessonIds } });
+
+      // Удаляем сдачи ДЗ и сами ДЗ уроков
+      const homeworks = await Homework.findAll({ where: { lessonId: lessonIds }, attributes: ['id'] });
+      const hwIds = homeworks.map(h => h.id);
+      if (hwIds.length > 0) {
+        await HomeworkSubmission.destroy({ where: { homeworkId: hwIds } });
+        await Homework.destroy({ where: { id: hwIds } });
+      }
+
+      // Удаляем уроки
+      await Lesson.destroy({ where: { groupId: group.id } });
+    }
+
+    // Удаляем студентов из группы
+    await GroupStudent.destroy({ where: { groupId: group.id } });
+
+    // Удаляем группу
     await group.destroy();
     res.json({ data: { message: 'Группа удалена' } });
   } catch (err) {

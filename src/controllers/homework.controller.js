@@ -1,4 +1,4 @@
-const { Homework, HomeworkSubmission, GroupStudent, Lesson, IndividualLesson } = require('../models');
+const { Homework, HomeworkSubmission, GroupStudent, Lesson, IndividualLesson, User } = require('../models');
 const { Op } = require('sequelize');
 
 // Исправлен баг: студент видит только ДЗ своих групп и инд. уроков.
@@ -9,9 +9,13 @@ const { Op } = require('sequelize');
 //   4. ДЗ у которых lessonId IN (шаг 2) OR individualLessonId IN (шаг 3)
 const getAll = async (req, res) => {
   try {
+    const page   = Math.max(1, parseInt(req.query.page)  || 1);
+    const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 50));
+    const offset = (page - 1) * limit;
+
     if (req.user.role === 'teacher') {
-      const homeworks = await Homework.findAll();
-      return res.json({ data: homeworks });
+      const { count, rows } = await Homework.findAndCountAll({ limit, offset });
+      return res.json({ data: rows, pagination: { page, limit, total: count, pages: Math.ceil(count / limit) } });
     }
 
     // Шаги 1–3: собираем допустимые ID
@@ -38,8 +42,19 @@ const getAll = async (req, res) => {
 
     if (orConditions.length === 0) return res.json({ data: [] });
 
-    const homeworks = await Homework.findAll({ where: { [Op.or]: orConditions } });
-    res.json({ data: homeworks });
+    // Включаем сдачу студента (если есть) — для отображения статуса на фронте
+    const { count, rows } = await Homework.findAndCountAll({
+      where: { [Op.or]: orConditions },
+      include: [{
+        model: HomeworkSubmission,
+        required: false,
+        where: { studentId: req.user.id },
+      }],
+      distinct: true,
+      limit,
+      offset,
+    });
+    res.json({ data: rows, pagination: { page, limit, total: count, pages: Math.ceil(count / limit) } });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Ошибка получения домашних заданий' });
@@ -97,11 +112,10 @@ const remove = async (req, res) => {
   }
 };
 
-// Студент сдаёт ДЗ (fileUrl из Cloudinary передаётся уже готовым)
+// Студент сдаёт ДЗ. fileUrl необязателен — можно сдать пустое с комментарием.
 const submit = async (req, res) => {
   try {
     const { fileUrl, comment } = req.body;
-    if (!fileUrl) return res.status(400).json({ error: 'fileUrl обязателен' });
 
     const hw = await Homework.findByPk(req.params.id);
     if (!hw) return res.status(404).json({ error: 'Задание не найдено' });
@@ -114,8 +128,8 @@ const submit = async (req, res) => {
     const sub = await HomeworkSubmission.create({
       homeworkId: hw.id,
       studentId:  req.user.id,
-      fileUrl,
-      comment,
+      fileUrl:    fileUrl || null,
+      comment:    comment || null,
     });
     res.status(201).json({ data: sub });
   } catch (err) {
@@ -128,6 +142,7 @@ const getSubmissions = async (req, res) => {
   try {
     const submissions = await HomeworkSubmission.findAll({
       where: { homeworkId: req.params.id },
+      include: [{ model: User, as: 'student', attributes: ['id', 'name', 'email'] }],
     });
     res.json({ data: submissions });
   } catch (err) {
