@@ -1,4 +1,13 @@
 require('dotenv').config();
+
+// Валидация обязательных env-переменных до старта
+const REQUIRED_ENV = ['JWT_SECRET', 'DB_URL', 'TEACHER_SECRET'];
+const missing = REQUIRED_ENV.filter(k => !process.env[k]);
+if (missing.length) {
+  console.error(`❌ Отсутствуют обязательные env-переменные: ${missing.join(', ')}`);
+  process.exit(1);
+}
+
 const app = require('./src/app');
 const sequelize = require('./src/config/database');
 

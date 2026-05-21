@@ -46,6 +46,11 @@ const getOne = async (req, res) => {
     });
     if (!group) return res.status(404).json({ error: 'Группа не найдена' });
 
+    // учитель видит только свою группу
+    if (req.user.role === 'teacher' && group.teacherId !== req.user.id) {
+      return res.status(403).json({ error: 'Доступ запрещён' });
+    }
+
     // студент может смотреть только свои группы
     if (req.user.role === 'student') {
       const isMember = await GroupStudent.findOne({
@@ -82,31 +87,32 @@ const remove = async (req, res) => {
     if (!group) return res.status(404).json({ error: 'Группа не найдена' });
     if (group.teacherId !== req.user.id) return res.status(403).json({ error: 'Доступ запрещён' });
 
-    // Получаем ID всех уроков группы
-    const lessons = await Lesson.findAll({ where: { groupId: group.id }, attributes: ['id'] });
-    const lessonIds = lessons.map(l => l.id);
+    // Каскадное удаление в транзакции — либо всё, либо ничего
+    await Group.sequelize.transaction(async (t) => {
+      const lessons = await Lesson.findAll({
+        where: { groupId: group.id }, attributes: ['id'], transaction: t,
+      });
+      const lessonIds = lessons.map(l => l.id);
 
-    if (lessonIds.length > 0) {
-      // Удаляем посещаемость уроков
-      await Attendance.destroy({ where: { lessonId: lessonIds } });
+      if (lessonIds.length > 0) {
+        await Attendance.destroy({ where: { lessonId: lessonIds }, transaction: t });
 
-      // Удаляем сдачи ДЗ и сами ДЗ уроков
-      const homeworks = await Homework.findAll({ where: { lessonId: lessonIds }, attributes: ['id'] });
-      const hwIds = homeworks.map(h => h.id);
-      if (hwIds.length > 0) {
-        await HomeworkSubmission.destroy({ where: { homeworkId: hwIds } });
-        await Homework.destroy({ where: { id: hwIds } });
+        const homeworks = await Homework.findAll({
+          where: { lessonId: lessonIds }, attributes: ['id'], transaction: t,
+        });
+        const hwIds = homeworks.map(h => h.id);
+        if (hwIds.length > 0) {
+          await HomeworkSubmission.destroy({ where: { homeworkId: hwIds }, transaction: t });
+          await Homework.destroy({ where: { id: hwIds }, transaction: t });
+        }
+
+        await Lesson.destroy({ where: { groupId: group.id }, transaction: t });
       }
 
-      // Удаляем уроки
-      await Lesson.destroy({ where: { groupId: group.id } });
-    }
+      await GroupStudent.destroy({ where: { groupId: group.id }, transaction: t });
+      await group.destroy({ transaction: t });
+    });
 
-    // Удаляем студентов из группы
-    await GroupStudent.destroy({ where: { groupId: group.id } });
-
-    // Удаляем группу
-    await group.destroy();
     res.json({ data: { message: 'Группа удалена' } });
   } catch (err) {
     console.error(err);
@@ -121,6 +127,7 @@ const addStudent = async (req, res) => {
 
     const group = await Group.findByPk(req.params.id);
     if (!group) return res.status(404).json({ error: 'Группа не найдена' });
+    if (group.teacherId !== req.user.id) return res.status(403).json({ error: 'Доступ запрещён' });
 
     const student = await User.findByPk(studentId);
     if (!student || student.role !== 'student') {
@@ -141,6 +148,9 @@ const addStudent = async (req, res) => {
 const removeStudent = async (req, res) => {
   try {
     const { id: groupId, studentId } = req.params;
+    const group = await Group.findByPk(groupId);
+    if (!group || group.teacherId !== req.user.id) return res.status(403).json({ error: 'Доступ запрещён' });
+
     const record = await GroupStudent.findOne({ where: { groupId, studentId } });
     if (!record) return res.status(404).json({ error: 'Студент не в группе' });
     await record.destroy();
@@ -156,6 +166,9 @@ const removeStudent = async (req, res) => {
 const generateLessons = async (req, res) => {
   try {
     const { from, to } = req.body;
+    const group = await Group.findByPk(req.params.id);
+    if (!group) return res.status(404).json({ error: 'Группа не найдена' });
+    if (group.teacherId !== req.user.id) return res.status(403).json({ error: 'Доступ запрещён' });
     const created = await generateGroupLessons({ groupId: req.params.id, from, to });
     res.json({ data: { created: created.length, lessons: created } });
   } catch (err) {

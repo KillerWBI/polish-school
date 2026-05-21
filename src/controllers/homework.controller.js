@@ -1,5 +1,20 @@
-const { Homework, HomeworkSubmission, GroupStudent, Lesson, IndividualLesson, User } = require('../models');
+const { Homework, HomeworkSubmission, GroupStudent, Lesson, Group, IndividualLesson, User } = require('../models');
 const { Op } = require('sequelize');
+
+// Возвращает true если учитель владеет уроком, к которому привязано ДЗ
+const isHwOwner = async (hw, teacherId) => {
+  if (hw.lessonId) {
+    const lesson = await Lesson.findByPk(hw.lessonId, {
+      include: [{ model: Group, attributes: ['teacherId'] }],
+    });
+    return !!(lesson && lesson.Group && lesson.Group.teacherId === teacherId);
+  }
+  if (hw.individualLessonId) {
+    const il = await IndividualLesson.findByPk(hw.individualLessonId, { attributes: ['teacherId'] });
+    return !!(il && il.teacherId === teacherId);
+  }
+  return false;
+};
 
 // Исправлен баг: студент видит только ДЗ своих групп и инд. уроков.
 // Алгоритм:
@@ -68,6 +83,21 @@ const create = async (req, res) => {
     if (!lessonId && !individualLessonId) {
       return res.status(400).json({ error: 'Нужен lessonId или individualLessonId' });
     }
+
+    // Ownership check
+    if (lessonId) {
+      const lesson = await Lesson.findByPk(lessonId, {
+        include: [{ model: Group, attributes: ['teacherId'] }],
+      });
+      if (!lesson || !lesson.Group || lesson.Group.teacherId !== req.user.id)
+        return res.status(403).json({ error: 'Урок не найден или доступ запрещён' });
+    }
+    if (individualLessonId) {
+      const il = await IndividualLesson.findByPk(individualLessonId, { attributes: ['teacherId'] });
+      if (!il || il.teacherId !== req.user.id)
+        return res.status(403).json({ error: 'Урок не найден или доступ запрещён' });
+    }
+
     const hw = await Homework.create({ lessonId, individualLessonId, description, deadline });
     res.status(201).json({ data: hw });
   } catch (err) {
@@ -91,6 +121,7 @@ const update = async (req, res) => {
   try {
     const hw = await Homework.findByPk(req.params.id);
     if (!hw) return res.status(404).json({ error: 'Задание не найдено' });
+    if (!await isHwOwner(hw, req.user.id)) return res.status(403).json({ error: 'Доступ запрещён' });
     const { description, deadline } = req.body;
     await hw.update({ description, deadline });
     res.json({ data: hw });
@@ -104,6 +135,7 @@ const remove = async (req, res) => {
   try {
     const hw = await Homework.findByPk(req.params.id);
     if (!hw) return res.status(404).json({ error: 'Задание не найдено' });
+    if (!await isHwOwner(hw, req.user.id)) return res.status(403).json({ error: 'Доступ запрещён' });
     await hw.destroy();
     res.json({ data: { message: 'Задание удалено' } });
   } catch (err) {
@@ -140,6 +172,10 @@ const submit = async (req, res) => {
 
 const getSubmissions = async (req, res) => {
   try {
+    const hw = await Homework.findByPk(req.params.id);
+    if (!hw) return res.status(404).json({ error: 'Задание не найдено' });
+    if (!await isHwOwner(hw, req.user.id)) return res.status(403).json({ error: 'Доступ запрещён' });
+
     const submissions = await HomeworkSubmission.findAll({
       where: { homeworkId: req.params.id },
       include: [{ model: User, as: 'student', attributes: ['id', 'name', 'email'] }],
@@ -153,6 +189,10 @@ const getSubmissions = async (req, res) => {
 
 const gradeSubmission = async (req, res) => {
   try {
+    const hw = await Homework.findByPk(req.params.id);
+    if (!hw) return res.status(404).json({ error: 'Задание не найдено' });
+    if (!await isHwOwner(hw, req.user.id)) return res.status(403).json({ error: 'Доступ запрещён' });
+
     const sub = await HomeworkSubmission.findByPk(req.params.subId);
     if (!sub) return res.status(404).json({ error: 'Сдача не найдена' });
     const { grade } = req.body;

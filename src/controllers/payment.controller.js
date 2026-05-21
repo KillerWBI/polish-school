@@ -1,4 +1,4 @@
-const { Payment, Attendance, Lesson, IndividualLesson, Group, GroupStudent, User } = require('../models');
+const { Payment, Attendance, Lesson, IndividualLesson, Group, GroupStudent, IndividualCourse, User } = require('../models');
 const { Op } = require('sequelize');
 
 const getAll = async (req, res) => {
@@ -78,21 +78,23 @@ const calculate = async (req, res) => {
       totals.set(lesson.studentId, (totals.get(lesson.studentId) ?? 0) + price);
     }
 
-    // ── 3. Запись в Payment (один upsert на студента) ────────────────────────
-    const results = [];
-    for (const [studentId, amount] of totals) {
-      const [payment, created] = await Payment.findOrCreate({
-        where: { studentId, month },
-        defaults: { amount, paid: false },
-      });
+    // ── 3. Запись в Payment (атомарный upsert на студента) ──────────────────
+    const results = await Payment.sequelize.transaction(async (t) => {
+      const out = [];
+      for (const [studentId, amount] of totals) {
+        const [payment, created] = await Payment.findOrCreate({
+          where: { studentId, month },
+          defaults: { amount, paid: false },
+          transaction: t,
+        });
 
-      if (!created && parseFloat(payment.amount) !== amount) {
-        await payment.update({ amount });
-        results.push(await payment.reload());
-      } else {
-        results.push(payment);
+        if (!created && parseFloat(payment.amount) !== amount) {
+          await payment.update({ amount }, { transaction: t });
+        }
+        out.push(payment);
       }
-    }
+      return out;
+    });
 
     res.json({ data: results });
   } catch (err) {
@@ -108,16 +110,17 @@ const update = async (req, res) => {
     });
     if (!payment) return res.status(404).json({ error: 'Запись оплаты не найдена' });
 
-    // Проверяем что этот студент учится у данного учителя
-    const isOwn = await GroupStudent.findOne({
-      include: [{
-        model: Group,
-        where: { teacherId: req.user.id },
-        required: true,
-      }],
+    // Проверяем что этот студент учится у данного учителя — через группу ИЛИ инд. курс
+    const isOwnGroup = await GroupStudent.findOne({
+      include: [{ model: Group, where: { teacherId: req.user.id }, required: true }],
       where: { studentId: payment.studentId },
     });
-    if (!isOwn) return res.status(403).json({ error: 'Доступ запрещён' });
+    const isOwnIndividual = isOwnGroup ? null : await IndividualCourse.findOne({
+      where: { studentId: payment.studentId, teacherId: req.user.id },
+    });
+    if (!isOwnGroup && !isOwnIndividual) {
+      return res.status(403).json({ error: 'Доступ запрещён' });
+    }
 
     const { paid } = req.body;
     await payment.update({ paid, paidAt: paid ? new Date() : null });

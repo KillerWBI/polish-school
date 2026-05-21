@@ -1,4 +1,4 @@
-const { Attendance, Lesson, Group } = require('../models');
+const { Attendance, Lesson, Group, IndividualLesson, User } = require('../models');
 const { Op } = require('sequelize');
 
 // GET /attendance?lessonId=&groupId=&month=YYYY-MM&from=&to=
@@ -10,8 +10,21 @@ const getAll = async (req, res) => {
     if (req.query.individualLessonId) where.individualLessonId = req.query.individualLessonId;
     if (req.query.studentId && req.user.role === 'teacher') where.studentId = req.query.studentId;
 
-    // Фильтрация по groupId — через JOIN с Lesson
-    const lessonInclude = { model: Lesson, attributes: ['id', 'date', 'time', 'groupId'], required: false };
+    // Включаем данные урока с группой и темой
+    const lessonInclude = {
+      model: Lesson,
+      attributes: ['id', 'date', 'time', 'topic', 'groupId'],
+      required: false,
+      include: [{ model: Group, attributes: ['id', 'name'] }],
+    };
+
+    // Включаем данные индивидуального урока
+    const indivInclude = {
+      model: IndividualLesson,
+      attributes: ['id', 'date', 'time', 'topic'],
+      required: false,
+      include: [{ model: User, as: 'student', attributes: ['id', 'name'] }],
+    };
 
     // Фильтрация по месяцу (YYYY-MM) или произвольному диапазону — через уроки
     if (req.query.month || req.query.from || req.query.to) {
@@ -42,8 +55,8 @@ const getAll = async (req, res) => {
 
     const { count, rows } = await Attendance.findAndCountAll({
       where,
-      include: [lessonInclude],
-      order: [[{ model: Lesson }, 'date', 'ASC']],
+      include: [lessonInclude, indivInclude],
+      order: [['createdAt', 'DESC']],
       limit,
       offset,
       subQuery: false,
@@ -69,6 +82,18 @@ const create = async (req, res) => {
       return res.status(400).json({ error: 'Нужен lessonId или individualLessonId' });
     }
 
+    // Ownership check
+    if (lessonId) {
+      const lesson = await Lesson.findByPk(lessonId, { include: [{ model: Group, attributes: ['teacherId'] }] });
+      if (!lesson || !lesson.Group || lesson.Group.teacherId !== req.user.id)
+        return res.status(403).json({ error: 'Доступ запрещён' });
+    }
+    if (individualLessonId) {
+      const il = await IndividualLesson.findByPk(individualLessonId, { attributes: ['teacherId'] });
+      if (!il || il.teacherId !== req.user.id)
+        return res.status(403).json({ error: 'Доступ запрещён' });
+    }
+
     const rows = records.map(r => ({
       lessonId:           lessonId           ?? null,
       individualLessonId: individualLessonId ?? null,
@@ -76,11 +101,18 @@ const create = async (req, res) => {
       present:   r.present ?? false,
     }));
 
-    const created = await Attendance.bulkCreate(rows, {
-      updateOnDuplicate: ['present'],
-    });
-
-    res.status(201).json({ data: created });
+    // Транзакция: удаляем старые записи урока, затем вставляем свежие
+    const whereClause = lessonId ? { lessonId } : { individualLessonId };
+    const t = await Attendance.sequelize.transaction();
+    try {
+      await Attendance.destroy({ where: whereClause, transaction: t });
+      const created = await Attendance.bulkCreate(rows, { transaction: t });
+      await t.commit();
+      res.status(201).json({ data: created });
+    } catch (err) {
+      await t.rollback();
+      throw err;
+    }
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Ошибка создания посещаемости' });
@@ -91,6 +123,18 @@ const update = async (req, res) => {
   try {
     const record = await Attendance.findByPk(req.params.id);
     if (!record) return res.status(404).json({ error: 'Запись не найдена' });
+
+    // Ownership check
+    if (record.lessonId) {
+      const lesson = await Lesson.findByPk(record.lessonId, { include: [{ model: Group, attributes: ['teacherId'] }] });
+      if (!lesson || !lesson.Group || lesson.Group.teacherId !== req.user.id)
+        return res.status(403).json({ error: 'Доступ запрещён' });
+    } else if (record.individualLessonId) {
+      const il = await IndividualLesson.findByPk(record.individualLessonId, { attributes: ['teacherId'] });
+      if (!il || il.teacherId !== req.user.id)
+        return res.status(403).json({ error: 'Доступ запрещён' });
+    }
+
     await record.update({ present: req.body.present });
     res.json({ data: record });
   } catch (err) {

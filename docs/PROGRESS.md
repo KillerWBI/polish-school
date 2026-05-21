@@ -19,6 +19,10 @@
 | `npm run db:migrate` / `db:migrate:undo` | ✅ 2026-05-20 |
 | Пагинация `?page=&limit=` на всех `getAll` | ✅ 2026-05-20 |
 | 401 → CustomEvent → AuthContext (фронт) | ✅ 2026-05-20 |
+| **`helmet`** (CSP/HSTS/X-Frame-Options) | ✅ 2026-05-21 |
+| **JSON body limit 256kb** | ✅ 2026-05-21 |
+| **Rate-limit на `/auth/register*`** (5/15мин) | ✅ 2026-05-21 |
+| **Env validation при старте** (`JWT_SECRET`, `DB_URL`, `TEACHER_SECRET`) | ✅ 2026-05-21 |
 
 ---
 
@@ -26,38 +30,42 @@
 
 | Модуль | Статус | Нерешённые проблемы |
 |--------|--------|---------------------|
-| Auth | ✅ | `registerTeacher` — нет проверки пароля ≥6 |
+| Auth | ✅ | — |
 | Users | ✅ | — |
-| Groups | 🟡 | `addStudent/removeStudent/getOne/generateLessons` — нет ownership check |
-| Lessons | ✅ | Запутанная WHERE логика в `getAll` (работает, но сложно читать) |
-| Individual Courses | 🟡 | `getOne/generateLessons` — нет ownership check |
+| Groups | ✅ | Запутанная WHERE логика в `lesson.getAll` (работает) |
+| Lessons | ✅ | — |
+| Individual Courses | ✅ | — |
 | Individual Lessons | ✅ | — |
-| Homework | 🔴 | `create/update/delete` — нет ownership; `getSubmissions/grade` — нет ownership; `getSubmissions` — нет include User |
-| Attendance | 🔴 | `create/update` — нет ownership check |
+| Homework | ✅ | — |
+| Attendance | ✅ | — |
 | Payments | 🟡 | N+1 запросы в `calculate` |
 
 ---
 
 ## Задачи
 
-### 🔴 Критично (безопасность)
-- [ ] `homework.create` — проверить `lessonId → Group.teacherId === req.user.id`
-- [ ] `homework.update/delete` — ownership через Lesson → Group
-- [ ] `homework.getSubmissions/gradeSubmission` — ownership check + include User (имя студента)
-- [ ] `attendance.create/update` — ownership через Lesson/IndividualLesson
-- [ ] `group.addStudent/removeStudent` — `group.teacherId === req.user.id`
-
-### 🟡 Важно
-- [ ] `group.getOne/generateLessons` — teacher ownership check
-- [ ] `individualCourse.getOne/generateLessons` — teacher ownership check
-- [ ] `auth.registerTeacher` — `password.length < 6`
+### ✅ Выполнено
+- [x] `homework.create/update/delete` — ownership check
+- [x] `homework.getSubmissions/gradeSubmission` — ownership check + include User
+- [x] `attendance.create/update` — ownership check
+- [x] `group.addStudent/removeStudent/getOne/generateLessons` — ownership check
+- [x] `individualCourse.getOne/generateLessons` — ownership check
+- [x] `auth.registerTeacher` — `password.length < 6`
+- [x] **Транзакция в `group.remove`** — каскадное удаление всех связанных таблиц теперь atomic (2026-05-21)
+- [x] **Транзакция в `payment.calculate`** — upsert каждой Payment-записи в одной транзакции (2026-05-21)
+- [x] **`payment.update` ownership** — теперь работает для студентов «только индивидуальные курсы» (fallback через `IndividualCourse`) (2026-05-21)
+- [x] **`attendance.create`** — delete-then-insert в транзакции, fix конфликта `ON CONFLICT (id)` vs unique `(lessonId, studentId)` (2026-05-21)
+- [x] **`attendance.getAll`** — Lesson include с `topic` + `Group.name`, добавлен `IndividualLesson` include с `student` (2026-05-21)
+- [x] **`individualLesson.getAll`** — поддержка фильтра `?individualCourseId=` (2026-05-21)
 
 ### ⚪ Низкий приоритет
 - [ ] N+1 в `payment.calculate` — заменить на JOIN
 - [ ] Очистить `buildDateWhere` в `lesson.controller.js`
+- [ ] Unique constraints на `Lesson(groupId, date, time)` и `HomeworkSubmission(homeworkId, studentId)` — миграция
 - [ ] `GET /payments/debt/:studentId`
 - [ ] Refresh token
 - [ ] Экспорт PDF/Excel
+- [ ] Health check `/health`
 
 ---
 
@@ -75,3 +83,8 @@
 | 2026-05-20 | sequelize-cli миграции + npm scripts |
 | 2026-05-20 | Пагинация findAndCountAll на всех getAll |
 | 2026-05-20 | Полное ревью: зафиксированы ownership check issues (см. REVIEW.md) |
+| 2026-05-20 | Закрыты все ownership checks: homework, attendance, group, individualCourse |
+| 2026-05-21 | `attendance.create` переписан на delete-then-insert в транзакции (fix `ON CONFLICT (id)` баг). `getAll` расширен: Lesson с темой/группой, IndividualLesson с именем студента |
+| 2026-05-21 | helmet + JSON limit 256kb + rate-limit на register (5/15мин) + env validation |
+| 2026-05-21 | Транзакции в `group.remove` и `payment.calculate`. Fix `payment.update` ownership для «чистых индивидуалов» |
+| 2026-05-21 | `individualLesson.getAll`: фильтр `?individualCourseId=` |

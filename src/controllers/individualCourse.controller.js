@@ -44,6 +44,9 @@ const getOne = async (req, res) => {
     const course = await IndividualCourse.findByPk(req.params.id);
     if (!course) return res.status(404).json({ error: 'Курс не найден' });
 
+    if (req.user.role === 'teacher' && course.teacherId !== req.user.id) {
+      return res.status(403).json({ error: 'Доступ запрещён' });
+    }
     if (req.user.role === 'student' && course.studentId !== req.user.id) {
       return res.status(403).json({ error: 'Доступ запрещён' });
     }
@@ -87,6 +90,9 @@ const remove = async (req, res) => {
 const generateLessons = async (req, res) => {
   try {
     const { from, to } = req.body;
+    const course = await IndividualCourse.findByPk(req.params.id);
+    if (!course) return res.status(404).json({ error: 'Курс не найден' });
+    if (course.teacherId !== req.user.id) return res.status(403).json({ error: 'Доступ запрещён' });
     const created = await generateIndividualLessons({ courseId: req.params.id, from, to });
     res.json({ data: { created: created.length, lessons: created } });
   } catch (err) {

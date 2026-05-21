@@ -10,6 +10,7 @@ const buildDateWhere = (query, role, userId) => {
     : { studentId: userId };
 
   if (query.studentId && role === 'teacher') where.studentId = query.studentId;
+  if (query.individualCourseId) where.individualCourseId = query.individualCourseId;
   if (query.date) { where.date = query.date; return where; }
   if (query.from || query.to) {
     where.date = {};
