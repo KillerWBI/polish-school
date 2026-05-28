@@ -9,9 +9,17 @@ const app = express();
 // Безопасные заголовки (CSP/HSTS/X-Frame и т.д.)
 app.use(helmet());
 
-// CORS — разрешаем только CLIENT_URL (в dev совпадает с localhost:5173)
+// CORS — в production строго по CLIENT_URL, в dev принимаем любой localhost:*
+// (Vite автоматически переходит на 5174/5175/... если 5173 занят).
+const isDev = process.env.NODE_ENV !== 'production';
 app.use(cors({
-  origin: process.env.CLIENT_URL || 'http://localhost:5173',
+  origin: (origin, cb) => {
+    // Запросы без origin (Postman, curl, server-to-server) — разрешаем
+    if (!origin) return cb(null, true);
+    if (isDev && /^http:\/\/localhost:\d+$/.test(origin)) return cb(null, true);
+    if (origin === process.env.CLIENT_URL) return cb(null, true);
+    cb(new Error('Не разрешено CORS-политикой'));
+  },
   credentials: true,
 }));
 
@@ -39,7 +47,12 @@ const registerLimiter = rateLimit({
 app.use('/api/v1/auth/register',         registerLimiter);
 app.use('/api/v1/auth/register-teacher', registerLimiter);
 
+// Мониторинг / health check
+app.get('/health', (req, res) => res.json({ status: 'ok', uptime: process.uptime() }));
+
 // Роуты
+app.use('/api/v1/dashboard',          require('./routes/dashboard.routes'));
+app.use('/api/v1/analytics',          require('./routes/analytics.routes'));
 app.use('/api/v1/auth',               require('./routes/auth.routes'));
 app.use('/api/v1/users',              require('./routes/user.routes'));
 app.use('/api/v1/groups',             require('./routes/group.routes'));

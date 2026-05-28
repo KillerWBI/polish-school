@@ -61,6 +61,70 @@ Response format:
 
 ---
 
+## Analytics
+
+| Method | Path | Auth | Role | Описание |
+|--------|------|------|------|----------|
+| GET | `/analytics/teacher/:userId` | ✅ | any | Аналитика учителя (публичная) |
+| GET | `/analytics/student/:id` | ✅ | own / связанный teacher | Аналитика студента |
+
+### GET /analytics/teacher/:userId
+
+Query: `?period=day|week|month` (default `month`)
+
+Возвращает агрегаты для графиков:
+- `revenueByPeriod` — два ряда `paid` (по `paidAt`) и `charged` (по `createdAt` платежа). `day` → 30 точек, `week` → 12, `month` → 6
+- `studentsByMonth` — активные студенты по месяцам (последние 6). «Активен» = был Payment с этим month
+- `avgAttendance` — общий % посещаемости по всем урокам учителя (число 0-100)
+- `totals` — `{ students, groups, lessons }` для статов в профиле
+
+```json
+// Response 200
+{
+  "data": {
+    "revenueByPeriod": [
+      { "bucket": "2026-04", "paid": 1500, "charged": 1800 },
+      { "bucket": "2026-05", "paid": 1200, "charged": 1600 }
+    ],
+    "studentsByMonth": [
+      { "bucket": "2026-04", "count": 15 },
+      { "bucket": "2026-05", "count": 17 }
+    ],
+    "avgAttendance": 87,
+    "totals": { "students": 18, "groups": 5, "lessons": 234 }
+  },
+  "meta": { "period": "month" }
+}
+
+// Response 404 — если userId не существует или не teacher
+{ "error": "Учитель не найден" }
+```
+
+### GET /analytics/student/:id
+
+Доступ: сам студент ИЛИ его учитель (проверяется через GroupStudent/IndividualCourse).
+
+```json
+// Response 200
+{
+  "data": {
+    "attendanceByMonth": [{ "bucket": "2026-04", "percent": 92 }],
+    "homeworkStats":     { "submitted": 23, "total": 28, "percent": 82 },
+    "grades": [
+      { "at": "2026-05-14T10:23:00.000Z", "grade": 5, "homework": "Падежи: упражнения 1-5" }
+    ],
+    "totals": { "attendance": 91, "gradesAvg": 4.6, "lessonsAttended": 45 }
+  }
+}
+
+// Response 403 — если запрашивающий не сам и не его учитель
+{ "error": "Доступ запрещён" }
+```
+
+**`homeworkStats.percent`** считается только по ДЗ с прошедшим дедлайном — будущие задания не портят процент.
+
+---
+
 ## Users
 
 | Method | Path | Auth | Role | Описание |
@@ -68,6 +132,47 @@ Response format:
 | GET | `/users` | ✅ | teacher | Список всех студентов |
 | GET | `/users/:id` | ✅ | teacher / own | Профиль пользователя |
 | PUT | `/users/:id` | ✅ | teacher / own | Обновить имя (email не меняется) |
+| **PUT** | **`/users/me/profile`** | ✅ | any | **Обновить свой профиль (Instagram-поля)** |
+| **GET** | **`/users/@:username/profile`** | ✅ | any | **Публичный профиль по username** |
+
+### PUT /users/me/profile
+Обновляет поля профиля текущего пользователя. Принимаются только перечисленные поля; остальное (email, password, role) игнорируется.
+
+```json
+// Body — все поля опциональны
+{
+  "name": "Иван Петров",
+  "username": "ivan_petrov",
+  "avatar": "https://res.cloudinary.com/.../avatar.jpg",
+  "coverImage": "https://res.cloudinary.com/.../cover.jpg",
+  "bio": "Преподаю польский 5 лет",
+  "socialTelegram": "ivan_pl",
+  "socialWhatsApp": "+48123456789",
+  "socialLinkedIn": "ivan-petrov",
+  "languages": [{ "code": "pl", "level": "C1" }, { "code": "en", "level": "B2" }]
+}
+
+// Response 200 — публичный профиль с новыми значениями
+{ "data": { "id", "name", "username", "role", "avatar", "coverImage", "bio", "socialTelegram", "socialWhatsApp", "socialLinkedIn", "languages", "createdAt" } }
+```
+
+**Валидация:**
+- `username`: `/^[a-z0-9_]{3,40}$/`, уникальность проверяется
+- `bio`: до 300 символов
+- `languages`: массив объектов с обязательным `code`; `level` опционален (для учителя — пусто)
+
+### GET /users/@:username/profile
+Возвращает публичный профиль любого пользователя. Доступ — все авторизованные. Аналитика отдаётся отдельным endpoint (Sprint B).
+
+```
+GET /users/@ivan_petrov/profile
+
+// Response 200
+{ "data": { "id", "name", "username", "role", "avatar", "coverImage", "bio", "socialTelegram", "socialWhatsApp", "socialLinkedIn", "languages", "createdAt" } }
+
+// Response 404
+{ "error": "Профиль не найден" }
+```
 
 ### GET /users
 ```json

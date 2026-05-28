@@ -7,11 +7,12 @@ const groupInclude = { model: Group, attributes: ['id', 'name', 'lessonLink', 't
 const buildDateWhere = (query) => {
   const where = {};
   if (query.groupId) where.groupId = query.groupId;
-  if (query.date)    where.date = query.date;
   if (query.from || query.to) {
     where.date = {};
     if (query.from) where.date[Op.gte] = query.from;
     if (query.to)   where.date[Op.lte] = query.to;
+  } else if (query.date) {
+    where.date = query.date;
   }
   return where;
 };

@@ -1,7 +1,7 @@
 require('dotenv').config();
 
 // Валидация обязательных env-переменных до старта
-const REQUIRED_ENV = ['JWT_SECRET', 'DB_URL', 'TEACHER_SECRET'];
+const REQUIRED_ENV = ['JWT_SECRET', 'DB_URL'];
 const missing = REQUIRED_ENV.filter(k => !process.env[k]);
 if (missing.length) {
   console.error(`❌ Отсутствуют обязательные env-переменные: ${missing.join(', ')}`);

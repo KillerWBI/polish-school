@@ -83,6 +83,15 @@ const create = async (req, res) => {
     if (!lessonId && !individualLessonId) {
       return res.status(400).json({ error: 'Нужен lessonId или individualLessonId' });
     }
+    if (lessonId && individualLessonId) {
+      return res.status(400).json({ error: 'Нельзя привязать ДЗ одновременно к групповому и индивидуальному уроку' });
+    }
+
+    // 👉 ЗАДАЧА S6 (пиши здесь): валидация deadline.
+    //    Если deadline передан и он в прошлом — вернуть 400.
+    //    Если deadline нет — пропустить (поле опционально).
+    //    Твой код ↓
+
 
     // Ownership check
     if (lessonId) {
