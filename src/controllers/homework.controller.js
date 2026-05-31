@@ -16,55 +16,80 @@ const isHwOwner = async (hw, teacherId) => {
   return false;
 };
 
-// Исправлен баг: студент видит только ДЗ своих групп и инд. уроков.
-// Алгоритм:
-//   1. Найти groupId студента через GroupStudent
-//   2. Найти lessonId из этих групп
-//   3. Найти individualLessonId где studentId = req.user.id
-//   4. ДЗ у которых lessonId IN (шаг 2) OR individualLessonId IN (шаг 3)
+// Собирает id уроков, к которым у пользователя есть доступ.
+//   teacher  → уроки его групп + его индивидуальные уроки
+//   student  → уроки групп, где он состоит + инд. уроки, где он студент
+// Возвращает { lessonIds, indLessonIds }. Используется в getAll / getOne / submit.
+const collectAccessibleLessonIds = async (user) => {
+  let groupIds;
+  if (user.role === 'teacher') {
+    const groups = await Group.findAll({ where: { teacherId: user.id }, attributes: ['id'] });
+    groupIds = groups.map(g => g.id);
+  } else {
+    const memberships = await GroupStudent.findAll({ where: { studentId: user.id }, attributes: ['groupId'] });
+    groupIds = memberships.map(m => m.groupId);
+  }
+
+  const [lessons, indLessons] = await Promise.all([
+    groupIds.length > 0
+      ? Lesson.findAll({ where: { groupId: { [Op.in]: groupIds } }, attributes: ['id'] })
+      : Promise.resolve([]),
+    IndividualLesson.findAll({
+      where: user.role === 'teacher' ? { teacherId: user.id } : { studentId: user.id },
+      attributes: ['id'],
+    }),
+  ]);
+
+  return {
+    lessonIds:    lessons.map(l => l.id),
+    indLessonIds: indLessons.map(il => il.id),
+  };
+};
+
+// true если студент имеет доступ к конкретному ДЗ
+// (состоит в группе урока ИЛИ это его индивидуальный урок).
+const studentCanAccessHw = async (hw, studentId) => {
+  if (hw.lessonId) {
+    const lesson = await Lesson.findByPk(hw.lessonId, { attributes: ['groupId'] });
+    if (!lesson) return false;
+    const member = await GroupStudent.findOne({
+      where: { groupId: lesson.groupId, studentId }, attributes: ['id'],
+    });
+    return !!member;
+  }
+  if (hw.individualLessonId) {
+    const il = await IndividualLesson.findByPk(hw.individualLessonId, { attributes: ['studentId'] });
+    return !!(il && il.studentId === studentId);
+  }
+  return false;
+};
+
+// S1: и учитель, и студент видят ТОЛЬКО ДЗ своих уроков.
 const getAll = async (req, res) => {
   try {
     const page   = Math.max(1, parseInt(req.query.page)  || 1);
     const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 50));
     const offset = (page - 1) * limit;
 
-    if (req.user.role === 'teacher') {
-      const { count, rows } = await Homework.findAndCountAll({ limit, offset });
-      return res.json({ data: rows, pagination: { page, limit, total: count, pages: Math.ceil(count / limit) } });
-    }
+    const { lessonIds, indLessonIds } = await collectAccessibleLessonIds(req.user);
 
-    // Шаги 1–3: собираем допустимые ID
-    const memberships = await GroupStudent.findAll({
-      where: { studentId: req.user.id },
-      attributes: ['groupId'],
-    });
-    const groupIds = memberships.map(m => m.groupId);
-
-    const [lessons, indLessons] = await Promise.all([
-      groupIds.length > 0
-        ? Lesson.findAll({ where: { groupId: { [Op.in]: groupIds } }, attributes: ['id'] })
-        : Promise.resolve([]),
-      IndividualLesson.findAll({ where: { studentId: req.user.id }, attributes: ['id'] }),
-    ]);
-
-    const lessonIds    = lessons.map(l => l.id);
-    const indLessonIds = indLessons.map(il => il.id);
-
-    // Если нет ни уроков, ни инд. уроков — пустой ответ
     const orConditions = [];
     if (lessonIds.length    > 0) orConditions.push({ lessonId:           { [Op.in]: lessonIds } });
     if (indLessonIds.length > 0) orConditions.push({ individualLessonId: { [Op.in]: indLessonIds } });
 
-    if (orConditions.length === 0) return res.json({ data: [] });
+    // Нет доступных уроков — нет ДЗ
+    if (orConditions.length === 0) {
+      return res.json({ data: [], pagination: { page, limit, total: 0, pages: 0 } });
+    }
 
-    // Включаем сдачу студента (если есть) — для отображения статуса на фронте
+    // Студенту подмешиваем его сдачу (для статуса на фронте); учителю — нет.
+    const include = req.user.role === 'student'
+      ? [{ model: HomeworkSubmission, required: false, where: { studentId: req.user.id } }]
+      : [];
+
     const { count, rows } = await Homework.findAndCountAll({
       where: { [Op.or]: orConditions },
-      include: [{
-        model: HomeworkSubmission,
-        required: false,
-        where: { studentId: req.user.id },
-      }],
+      include,
       distinct: true,
       limit,
       offset,
@@ -78,20 +103,9 @@ const getAll = async (req, res) => {
 
 const create = async (req, res) => {
   try {
+    // Формат/обязательность/взаимоисключение/будущий deadline уже проверены
+    // схемой createHomework (middleware validate). Здесь — только ownership.
     const { lessonId, individualLessonId, description, deadline } = req.body;
-    if (!description) return res.status(400).json({ error: 'Описание обязательно' });
-    if (!lessonId && !individualLessonId) {
-      return res.status(400).json({ error: 'Нужен lessonId или individualLessonId' });
-    }
-    if (lessonId && individualLessonId) {
-      return res.status(400).json({ error: 'Нельзя привязать ДЗ одновременно к групповому и индивидуальному уроку' });
-    }
-
-    // 👉 ЗАДАЧА S6 (пиши здесь): валидация deadline.
-    //    Если deadline передан и он в прошлом — вернуть 400.
-    //    Если deadline нет — пропустить (поле опционально).
-    //    Твой код ↓
-
 
     // Ownership check
     if (lessonId) {
@@ -115,10 +129,17 @@ const create = async (req, res) => {
   }
 };
 
+// S3: читать ДЗ может только владелец-учитель ИЛИ студент этого урока.
 const getOne = async (req, res) => {
   try {
     const hw = await Homework.findByPk(req.params.id);
     if (!hw) return res.status(404).json({ error: 'Задание не найдено' });
+
+    const allowed = req.user.role === 'teacher'
+      ? await isHwOwner(hw, req.user.id)
+      : await studentCanAccessHw(hw, req.user.id);
+    if (!allowed) return res.status(403).json({ error: 'Доступ запрещён' });
+
     res.json({ data: hw });
   } catch (err) {
     console.error(err);
@@ -160,6 +181,11 @@ const submit = async (req, res) => {
 
     const hw = await Homework.findByPk(req.params.id);
     if (!hw) return res.status(404).json({ error: 'Задание не найдено' });
+
+    // S2: студент может сдать только ДЗ своих групп / инд. уроков
+    if (!await studentCanAccessHw(hw, req.user.id)) {
+      return res.status(403).json({ error: 'Это задание не относится к вашим занятиям' });
+    }
 
     const existing = await HomeworkSubmission.findOne({
       where: { homeworkId: hw.id, studentId: req.user.id },
@@ -204,10 +230,8 @@ const gradeSubmission = async (req, res) => {
 
     const sub = await HomeworkSubmission.findByPk(req.params.subId);
     if (!sub) return res.status(404).json({ error: 'Сдача не найдена' });
+    // grade (0–100, целое) уже проверен схемой gradeSubmission.
     const { grade } = req.body;
-    if (grade !== undefined && (!Number.isInteger(grade) || grade < 0 || grade > 100)) {
-      return res.status(400).json({ error: 'grade: целое число от 0 до 100' });
-    }
     await sub.update({ grade, status: 'graded' });
     res.json({ data: sub });
   } catch (err) {

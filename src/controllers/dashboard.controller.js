@@ -367,14 +367,14 @@ const buildTeacherActivity = async (teacherId) => {
     ...submissions.map(s => ({
       id:   `sub-${s.id}`,
       type: 'submission',
-      text: `${s.student?.name ?? '?'} сдал${s.student?.name?.endsWith('а') ? 'а' : ''} ДЗ «${s.Homework?.description?.slice(0, 40) ?? ''}»`,
+      text: `${s.student?.name ?? '?'} сдал(а) ДЗ «${s.Homework?.description?.slice(0, 40) ?? ''}»`,
       at:   s.createdAt,
       extra: s.status === 'pending' ? 'Ждёт проверки' : 'Проверено',
     })),
     ...payments.map(p => ({
       id:   `pay-${p.id}`,
       type: 'payment',
-      text: `${p.student?.name ?? '?'} оплатил${p.student?.name?.endsWith('а') ? 'а' : ''} ${p.month} — ${p.amount} zł`,
+      text: `${p.student?.name ?? '?'} оплатил(а) ${p.month} — ${p.amount} zł`,
       at:   p.updatedAt,
       extra: null,
     })),
@@ -404,7 +404,7 @@ const buildStudentActivity = async (studentId) => {
       const isGraded = s.status === 'graded';
       const text = isGraded
         ? `Оценка ${s.grade}/100 за «${s.Homework?.description?.slice(0, 40) ?? ''}»`
-        : `Сдал${s.studentId ? '' : ''} «${s.Homework?.description?.slice(0, 40) ?? ''}» — ждёт проверки`;
+        : `Сдал(а) «${s.Homework?.description?.slice(0, 40) ?? ''}» — ждёт проверки`;
       return {
         id:   `sub-${s.id}`,
         type: isGraded ? 'grade' : 'submission',

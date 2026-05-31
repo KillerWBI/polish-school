@@ -1,12 +1,42 @@
 const { Payment, Attendance, Lesson, IndividualLesson, Group, GroupStudent, IndividualCourse, User } = require('../models');
 const { Op } = require('sequelize');
 
+// id студентов учителя: через его группы (GroupStudent) + индивидуальные курсы.
+// Set убирает дубли, если студент и в группе, и на инд. курсе.
+const getTeacherStudentIds = async (teacherId) => {
+  const groups = await Group.findAll({ where: { teacherId }, attributes: ['id'] });
+  const groupIds = groups.map(g => g.id);
+
+  const [groupStudents, indCourses] = await Promise.all([
+    groupIds.length
+      ? GroupStudent.findAll({ where: { groupId: { [Op.in]: groupIds } }, attributes: ['studentId'] })
+      : Promise.resolve([]),
+    IndividualCourse.findAll({ where: { teacherId }, attributes: ['studentId'] }),
+  ]);
+
+  return [...new Set([
+    ...groupStudents.map(r => r.studentId),
+    ...indCourses.map(r => r.studentId),
+  ])];
+};
+
 const getAll = async (req, res) => {
   try {
-    const where = req.user.role === 'student' ? { studentId: req.user.id } : {};
     const page   = Math.max(1, parseInt(req.query.page)  || 1);
     const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 50));
     const offset = (page - 1) * limit;
+
+    // S4: учитель видит платежи ТОЛЬКО своих студентов (не всех в БД).
+    let where;
+    if (req.user.role === 'student') {
+      where = { studentId: req.user.id };
+    } else {
+      const studentIds = await getTeacherStudentIds(req.user.id);
+      if (studentIds.length === 0) {
+        return res.json({ data: [], pagination: { page, limit, total: 0, pages: 0 } });
+      }
+      where = { studentId: { [Op.in]: studentIds } };
+    }
 
     const { count, rows } = await Payment.findAndCountAll({
       where,

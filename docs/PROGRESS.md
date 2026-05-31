@@ -36,9 +36,9 @@
 | Lessons | ✅ | — |
 | Individual Courses | ✅ | — |
 | Individual Lessons | ✅ | — |
-| Homework | 🔴 | **Multi-tenancy дыры:** `getAll` для teacher без teacherId-фильтра, `submit` без membership check, `getOne` без ownership check (см. [REVIEW.md](../../REVIEW.md) #1-#3) |
+| Homework | ✅ | Multi-tenancy дыры закрыты 2026-05-31 (#1-#3). Zod-валидация подключена (референс-модуль) |
 | Attendance | ✅ | — |
-| Payments | 🔴 | **Multi-tenancy дыра:** `getAll` для teacher возвращает все Payment в БД (см. [REVIEW.md](../../REVIEW.md) #4) + N+1 в `calculate` |
+| Payments | ✅ | Multi-tenancy дыра закрыта 2026-05-31 (#4). Остаётся N+1 в `calculate` (низкий приоритет) |
 
 ---
 
@@ -48,12 +48,12 @@
 
 Блокер для публичного запуска. До этих фиксов нельзя пускать второго учителя в платформу.
 
-- [ ] **#1 `homework.controller.js:32`** — `getAll` для teacher: добавить фильтр через lessonIds учителя (учитель сейчас видит все ДЗ всех учителей)
-- [ ] **#2 `homework.controller.js:submit`** — проверить что студент состоит в группе/инд.уроке этого ДЗ (сейчас может сдать любое чужое ДЗ)
-- [ ] **#3 `homework.controller.js:getOne`** — добавить ownership/membership check
-- [ ] **#4 `payment.controller.js:getAll`** — для teacher фильтровать `where.studentId IN (его студенты)` (сейчас возвращает все Payment в БД)
-- [ ] **#5** Убрать gender-heuristic в `dashboard.controller` activity feed (`name?.endsWith('а')` ломается на «Никита»)
-- [ ] **#6** Валидация `deadline >= now` в `homework.create`
+- [x] **#1 `homework.getAll`** — ✅ 2026-05-31 `collectAccessibleLessonIds(user)`, обе роли фильтруются по своим урокам
+- [x] **#2 `homework.submit`** — ✅ 2026-05-31 `studentCanAccessHw()` перед созданием сдачи → 403
+- [x] **#3 `homework.getOne`** — ✅ 2026-05-31 owner (учитель) / membership (студент)
+- [x] **#4 `payment.getAll`** — ✅ 2026-05-31 `getTeacherStudentIds()` → `studentId IN (свои)`
+- [x] **#5** Убрать gender-heuristic в `dashboard.controller` — ✅ 2026-05-31 (заменён `endsWith('а')` на нейтральное `сдал(а)`/`оплатил(а)`, TASK-1)
+- [x] **#6** Валидация `deadline >= now` в `homework.create` — ✅ 2026-05-31 (`isNaN(getTime())` ловит битую дату + `deadlineDate < new Date()` ловит прошлое)
 - [ ] **#7** Валидация `month` (не future) в `payment.calculate`
 - [ ] **#8** N+1 в `payment.calculate` — заменить циклы на один SQL с GROUP BY
 
@@ -90,6 +90,11 @@
 - [ ] `GET /admin/teachers` — список учителей (count студентов, дата регистрации, статус)
 - [ ] `PATCH /admin/users/:id` — деактивация/активация аккаунта
 
+### 🟢 Архитектура: слой валидации Zod
+- [x] **`src/middleware/validate.js`** — ✅ 2026-05-31, `validate(schema, source)` → safeParse → 400 или `req[source]=data`
+- [x] **`src/schemas/homework.schema.js`** — ✅ 2026-05-31, схемы create/update/submit/grade, подключены в `homework.routes.js`, контроллер очищен от ручных `if`
+- [ ] Раскатать на остальные 8 модулей (auth, user, group, lesson, individualCourse, individualLesson, attendance, payment) → [TASKS.md](../../TASKS.md) #3–#5
+
 ### ⚪ Низкий приоритет
 - [ ] N+1 в `payment.calculate` — заменить на JOIN
 - [ ] Очистить `buildDateWhere` в `lesson.controller.js`
@@ -121,3 +126,5 @@
 | 2026-05-21 | `individualLesson.getAll`: фильтр `?individualCourseId=` |
 | 2026-05-25 | **Sprint A:** профильные поля User (`username` уникальный + `avatar`, `coverImage`, `bio`, `socialTelegram/WhatsApp/LinkedIn`, `languages JSONB`); миграция с безопасным backfill; `utils/username.js` с транслитом кириллицы; авто-генерация username при регистрации; `PUT /users/me/profile` + `GET /users/@:username/profile`; `userResponse` отдаёт username и avatar |
 | 2026-05-25 | **Sprint B:** Analytics API — `GET /analytics/teacher/:userId` (revenue 2-line с фильтром period day/week/month, students/month, avgAttendance, totals) + `GET /analytics/student/:id` (attendance/month, hw completion с прошедшим deadline, grades timeline, totals). Raw SQL агрегации, fillBuckets для непрерывности графиков. Helper `canViewStudentAnalytics` через Group belongsToMany + IndividualCourse. |
+| 2026-05-31 | Закрыт баг #6/#8 — валидация `deadline`. **Закрыты #1–#4 (multi-tenancy)** в homework + payment. **Внедрён Zod-слой** на homework (`validate` middleware + схемы + очистка контроллера, `zod@4`). Создан TASKS.md — учебные задачи. |
+| 2026-05-31 | **TASK-1 (#5):** убран gender-heuristic в `dashboard.controller` — `endsWith('а')` → `сдал(а)`/`оплатил(а)`. |
