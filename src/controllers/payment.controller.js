@@ -22,8 +22,8 @@ const getTeacherStudentIds = async (teacherId) => {
 
 const getAll = async (req, res) => {
   try {
-    const page   = Math.max(1, parseInt(req.query.page)  || 1);
-    const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 50));
+    // page/limit уже проверены и приведены к числам схемой paginationQuery (validate 'query').
+    const { page, limit } = req.validatedQuery;
     const offset = (page - 1) * limit;
 
     // S4: учитель видит платежи ТОЛЬКО своих студентов (не всех в БД).
@@ -57,11 +57,8 @@ const getAll = async (req, res) => {
 // Body: { month: "2026-05" }
 const calculate = async (req, res) => {
   try {
+    // Формат YYYY-MM и «не будущее» проверены схемой calculatePaymentSchema.
     const { month } = req.body;
-    if (!month || !/^\d{4}-\d{2}$/.test(month)) {
-      return res.status(400).json({ error: 'month обязателен в формате YYYY-MM' });
-    }
-
     const [year, mon] = month.split('-').map(Number);
     const startDate = `${year}-${String(mon).padStart(2, '0')}-01`;
     const endDate   = new Date(year, mon, 0).toISOString().slice(0, 10);
@@ -132,6 +129,7 @@ const calculate = async (req, res) => {
     res.status(500).json({ error: 'Ошибка расчёта оплаты' });
   }
 };
+
 
 const update = async (req, res) => {
   try {

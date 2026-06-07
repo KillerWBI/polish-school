@@ -22,8 +22,8 @@ const getAll = async (req, res) => {
 
 const create = async (req, res) => {
   try {
+    // name/schedule/pricePerLesson проверены схемой createGroup.
     const { name, schedule, lessonLink, pricePerLesson } = req.body;
-    if (!name) return res.status(400).json({ error: 'Название обязательно' });
 
     const group = await Group.create({
       name,
@@ -122,8 +122,8 @@ const remove = async (req, res) => {
 
 const addStudent = async (req, res) => {
   try {
+    // studentId (UUID) проверен схемой addStudent.
     const { studentId } = req.body;
-    if (!studentId) return res.status(400).json({ error: 'studentId обязателен' });
 
     const group = await Group.findByPk(req.params.id);
     if (!group) return res.status(404).json({ error: 'Группа не найдена' });

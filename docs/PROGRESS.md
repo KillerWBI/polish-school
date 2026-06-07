@@ -54,7 +54,7 @@
 - [x] **#4 `payment.getAll`** — ✅ 2026-05-31 `getTeacherStudentIds()` → `studentId IN (свои)`
 - [x] **#5** Убрать gender-heuristic в `dashboard.controller` — ✅ 2026-05-31 (заменён `endsWith('а')` на нейтральное `сдал(а)`/`оплатил(а)`, TASK-1)
 - [x] **#6** Валидация `deadline >= now` в `homework.create` — ✅ 2026-05-31 (`isNaN(getTime())` ловит битую дату + `deadlineDate < new Date()` ловит прошлое)
-- [ ] **#7** Валидация `month` (не future) в `payment.calculate`
+- [x] **#7** Валидация `month` (не future) в `payment.calculate` — ✅ 2026-06-02 (TASK-2, сравнение строк `YYYY-MM`)
 - [ ] **#8** N+1 в `payment.calculate` — заменить циклы на один SQL с GROUP BY
 
 ### ✅ Выполнено
@@ -93,7 +93,9 @@
 ### 🟢 Архитектура: слой валидации Zod
 - [x] **`src/middleware/validate.js`** — ✅ 2026-05-31, `validate(schema, source)` → safeParse → 400 или `req[source]=data`
 - [x] **`src/schemas/homework.schema.js`** — ✅ 2026-05-31, схемы create/update/submit/grade, подключены в `homework.routes.js`, контроллер очищен от ручных `if`
-- [ ] Раскатать на остальные 8 модулей (auth, user, group, lesson, individualCourse, individualLesson, attendance, payment) → [TASKS.md](../../TASKS.md) #3–#5
+- [x] **`payment`** — ✅ TASK-3 (2026-06-04): `calculatePaymentSchema` (month + refine), `updatePaymentSchema`, `paginationQuery`. Порядок middleware `auth, isTeacher, validate`. **Урок Express 5:** `req.query` — getter, `validate` для query пишет в `req.validatedQuery`
+- [x] **`group` + `lesson`** — ✅ TASK-4 (2026-06-04): `group.schema.js` (create/update/addStudent + scheduleSlot), `lesson.schema.js` (create/update). Подключены, контроллеры очищены
+- [ ] Раскатать на остальные модули (auth, user, individualCourse, individualLesson, attendance) → [TASKS.md](../../TASKS.md) секция «Бэклог» (B1/B2, техдолг)
 
 ### ⚪ Низкий приоритет
 - [ ] N+1 в `payment.calculate` — заменить на JOIN
@@ -128,3 +130,6 @@
 | 2026-05-25 | **Sprint B:** Analytics API — `GET /analytics/teacher/:userId` (revenue 2-line с фильтром period day/week/month, students/month, avgAttendance, totals) + `GET /analytics/student/:id` (attendance/month, hw completion с прошедшим deadline, grades timeline, totals). Raw SQL агрегации, fillBuckets для непрерывности графиков. Helper `canViewStudentAnalytics` через Group belongsToMany + IndividualCourse. |
 | 2026-05-31 | Закрыт баг #6/#8 — валидация `deadline`. **Закрыты #1–#4 (multi-tenancy)** в homework + payment. **Внедрён Zod-слой** на homework (`validate` middleware + схемы + очистка контроллера, `zod@4`). Создан TASKS.md — учебные задачи. |
 | 2026-05-31 | **TASK-1 (#5):** убран gender-heuristic в `dashboard.controller` — `endsWith('а')` → `сдал(а)`/`оплатил(а)`. |
+| 2026-06-02 | **TASK-2 (#7):** `payment.calculate` блокирует будущий месяц (`now < month` → 400). |
+| 2026-06-04 | **TASK-3 (готово):** Zod для `payment` — calculate (+refine «не будущее»), update, paginationQuery. Порядок middleware `auth, isTeacher, validate`. Express 5: `req.query` getter → `validate` пишет в `req.validatedQuery`. |
+| 2026-06-04 | **TASK-4 (готово):** Zod для `group` (create/update/addStudent + scheduleSlot day0-6/HH:MM) и `lesson` (create/update, uuid+date+time). Контроллеры очищены от ручных `if`. |

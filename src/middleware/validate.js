@@ -10,7 +10,13 @@ const validate = (schema, source = 'body') => (req, res, next) => {
     const msg = result.error.issues[0]?.message || 'Ошибка валидации';
     return res.status(400).json({ error: msg });
   }
-  req[source] = result.data;
+  // В Express 5 req.query — getter (только чтение), переприсвоить нельзя.
+  // Поэтому очищенные query-данные кладём в req.validatedQuery, а body/params — на место.
+  if (source === 'query') {
+    req.validatedQuery = result.data;
+  } else {
+    req[source] = result.data;
+  }
   next();
 };
 

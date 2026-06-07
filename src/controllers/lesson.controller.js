@@ -67,10 +67,8 @@ const getAll = async (req, res) => {
 
 const create = async (req, res) => {
   try {
+    // groupId/date/time проверены схемой createLesson.
     const { groupId, date, time, topic, description, lessonLink, materials } = req.body;
-    if (!groupId || !date || !time) {
-      return res.status(400).json({ error: 'groupId, date и time обязательны' });
-    }
 
     // Проверяем что группа принадлежит этому учителю
     const group = await Group.findByPk(groupId);
