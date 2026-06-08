@@ -1,5 +1,6 @@
 const { Attendance, Lesson, Group, IndividualLesson, User } = require('../models');
-const { Op } = require('sequelize');
+const { Op } = require('sequelize')
+const { isHwOwner } = require('../utils/ownership');
 
 // GET /attendance?lessonId=&groupId=&month=YYYY-MM&from=&to=
 const getAll = async (req, res) => {
@@ -82,17 +83,11 @@ const create = async (req, res) => {
       return res.status(400).json({ error: 'Нужен lessonId или individualLessonId' });
     }
 
+
+
     // Ownership check
-    if (lessonId) {
-      const lesson = await Lesson.findByPk(lessonId, { include: [{ model: Group, attributes: ['teacherId'] }] });
-      if (!lesson || !lesson.Group || lesson.Group.teacherId !== req.user.id)
-        return res.status(403).json({ error: 'Доступ запрещён' });
-    }
-    if (individualLessonId) {
-      const il = await IndividualLesson.findByPk(individualLessonId, { attributes: ['teacherId'] });
-      if (!il || il.teacherId !== req.user.id)
-        return res.status(403).json({ error: 'Доступ запрещён' });
-    }
+
+    if ( !await isHwOwner({ lessonId, individualLessonId }, req.user.id) ) return res.status(403).json({ error: 'доступ запрещён' });
 
     const rows = records.map(r => ({
       lessonId:           lessonId           ?? null,
@@ -125,15 +120,8 @@ const update = async (req, res) => {
     if (!record) return res.status(404).json({ error: 'Запись не найдена' });
 
     // Ownership check
-    if (record.lessonId) {
-      const lesson = await Lesson.findByPk(record.lessonId, { include: [{ model: Group, attributes: ['teacherId'] }] });
-      if (!lesson || !lesson.Group || lesson.Group.teacherId !== req.user.id)
-        return res.status(403).json({ error: 'Доступ запрещён' });
-    } else if (record.individualLessonId) {
-      const il = await IndividualLesson.findByPk(record.individualLessonId, { attributes: ['teacherId'] });
-      if (!il || il.teacherId !== req.user.id)
-        return res.status(403).json({ error: 'Доступ запрещён' });
-    }
+    if ( !await isHwOwner(record, req.user.id) ) return res.status(403).json({ error: 'доступ запрещён' });
+
 
     await record.update({ present: req.body.present });
     res.json({ data: record });

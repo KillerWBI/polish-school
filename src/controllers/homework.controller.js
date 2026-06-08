@@ -1,20 +1,8 @@
 const { Homework, HomeworkSubmission, GroupStudent, Lesson, Group, IndividualLesson, User } = require('../models');
 const { Op } = require('sequelize');
+const { isHwOwner } = require('../utils/ownership');
 
-// Возвращает true если учитель владеет уроком, к которому привязано ДЗ
-const isHwOwner = async (hw, teacherId) => {
-  if (hw.lessonId) {
-    const lesson = await Lesson.findByPk(hw.lessonId, {
-      include: [{ model: Group, attributes: ['teacherId'] }],
-    });
-    return !!(lesson && lesson.Group && lesson.Group.teacherId === teacherId);
-  }
-  if (hw.individualLessonId) {
-    const il = await IndividualLesson.findByPk(hw.individualLessonId, { attributes: ['teacherId'] });
-    return !!(il && il.teacherId === teacherId);
-  }
-  return false;
-};
+
 
 // Собирает id уроков, к которым у пользователя есть доступ.
 //   teacher  → уроки его групп + его индивидуальные уроки

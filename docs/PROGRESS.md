@@ -133,3 +133,4 @@
 | 2026-06-02 | **TASK-2 (#7):** `payment.calculate` блокирует будущий месяц (`now < month` → 400). |
 | 2026-06-04 | **TASK-3 (готово):** Zod для `payment` — calculate (+refine «не будущее»), update, paginationQuery. Порядок middleware `auth, isTeacher, validate`. Express 5: `req.query` getter → `validate` пишет в `req.validatedQuery`. |
 | 2026-06-04 | **TASK-4 (готово):** Zod для `group` (create/update/addStudent + scheduleSlot day0-6/HH:MM) и `lesson` (create/update, uuid+date+time). Контроллеры очищены от ручных `if`. |
+| 2026-06-07 | **TASK-6 (готово):** ownership-проверка вынесена в `utils/ownership.js` — чистый предикат `isHwOwner({lessonId,individualLessonId}, teacherId) → boolean`. Дубли убраны из `homework` (5 мест) и `attendance` (create/update). Выбран helper, а не middleware (id то в body, то в params; полиморфизм; сущность нужна дальше). Граница: utils = «да/нет», контроллер = HTTP 403. |
