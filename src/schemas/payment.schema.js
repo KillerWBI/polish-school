@@ -8,9 +8,9 @@ const calculatePaymentSchema = z.object({
     .refine(m => m <= new Date().toISOString().slice(0, 7), 'Нельзя рассчитать оплату за будущий месяц'),
 });
 
-// PUT /payments/:id — отметка оплаты.
+// PUT /payments/:id — отметка оплаты. paid обязателен (нет смысла обновлять пустое тело).
 const updatePaymentSchema = z.object({
-  paid: z.boolean().optional(),
+  paid: z.boolean({ required_error: 'paid обязателен (true/false)' }),
 });
 
 // GET /payments — пагинация из query.

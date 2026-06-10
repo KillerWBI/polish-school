@@ -91,7 +91,11 @@ const getOne = async (req, res) => {
     });
     if (!lesson) return res.status(404).json({ error: 'Урок не найден' });
 
-    if (req.user.role === 'student') {
+    if (req.user.role === 'teacher') {
+      if (lesson.Group?.teacherId !== req.user.id) {
+        return res.status(403).json({ error: 'Доступ запрещён' });
+      }
+    } else {
       const isMember = await GroupStudent.findOne({
         where: { groupId: lesson.groupId, studentId: req.user.id },
       });

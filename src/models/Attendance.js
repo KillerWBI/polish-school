@@ -19,10 +19,29 @@ const Attendance = sequelize.define('Attendance', {
     type: DataTypes.UUID,
     allowNull: false,
   },
+  // Итоговый результат: null = ожидает подтверждения, true = присутствовал, false = отсутствовал/спор
   present: {
     type: DataTypes.BOOLEAN,
+    allowNull: true,
+    defaultValue: null,
+  },
+  // Что отметил учитель
+  teacherMarked: {
+    type: DataTypes.BOOLEAN,
+    allowNull: true,
+    defaultValue: null,
+  },
+  // Что подтвердил студент
+  studentMarked: {
+    type: DataTypes.BOOLEAN,
+    allowNull: true,
+    defaultValue: null,
+  },
+  // Статус двойного подтверждения
+  status: {
+    type: DataTypes.ENUM('pending_student', 'confirmed', 'disputed'),
     allowNull: false,
-    defaultValue: false,
+    defaultValue: 'confirmed',
   },
 }, {
   // Уникальные индексы защищают от дублей при bulkCreate.

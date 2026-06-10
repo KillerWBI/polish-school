@@ -1,17 +1,53 @@
 const { Attendance, Lesson, Group, IndividualLesson, User } = require('../models');
-const { Op } = require('sequelize')
+const { Op } = require('sequelize');
 const { isHwOwner } = require('../utils/ownership');
 
-// GET /attendance?lessonId=&groupId=&month=YYYY-MM&from=&to=
+// ── Авто-подтверждение: если студент не ответил за 3 дня — засчитываем как учитель ──
+const autoConfirmExpired = async () => {
+  const cutoff = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+  await Attendance.sequelize.query(`
+    UPDATE "Attendances" a
+    SET "studentMarked" = "teacherMarked",
+        "status"        = 'confirmed',
+        "present"       = "teacherMarked",
+        "updatedAt"     = NOW()
+    FROM "Lessons" l
+    WHERE a."lessonId" = l.id
+      AND a."status" = 'pending_student'
+      AND l."date" < :cutoff
+  `, { replacements: { cutoff } });
+
+  await Attendance.sequelize.query(`
+    UPDATE "Attendances" a
+    SET "studentMarked" = "teacherMarked",
+        "status"        = 'confirmed',
+        "present"       = "teacherMarked",
+        "updatedAt"     = NOW()
+    FROM "IndividualLessons" il
+    WHERE a."individualLessonId" = il.id
+      AND a."status" = 'pending_student'
+      AND il."date" < :cutoff
+  `, { replacements: { cutoff } });
+};
+
+// ── GET /attendance — история для текущего пользователя ──────────────────────────
 const getAll = async (req, res) => {
   try {
+    // Сначала авто-подтверждаем просроченные pending-записи (ленивая обработка)
+    await autoConfirmExpired();
+
     const where = req.user.role === 'student' ? { studentId: req.user.id } : {};
 
-    if (req.query.lessonId)           where.lessonId = req.query.lessonId;
+    if (req.query.lessonId)           where.lessonId           = req.query.lessonId;
     if (req.query.individualLessonId) where.individualLessonId = req.query.individualLessonId;
     if (req.query.studentId && req.user.role === 'teacher') where.studentId = req.query.studentId;
 
-    // Включаем данные урока с группой и темой
+    // Фильтр по статусу: по умолчанию только 'confirmed'
+    if (req.query.status) {
+      where.status = req.query.status;
+    }
+
     const lessonInclude = {
       model: Lesson,
       attributes: ['id', 'date', 'time', 'topic', 'groupId'],
@@ -19,7 +55,6 @@ const getAll = async (req, res) => {
       include: [{ model: Group, attributes: ['id', 'name'] }],
     };
 
-    // Включаем данные индивидуального урока
     const indivInclude = {
       model: IndividualLesson,
       attributes: ['id', 'date', 'time', 'topic'],
@@ -27,14 +62,13 @@ const getAll = async (req, res) => {
       include: [{ model: User, as: 'student', attributes: ['id', 'name'] }],
     };
 
-    // Фильтрация по месяцу (YYYY-MM) или произвольному диапазону — через уроки
     if (req.query.month || req.query.from || req.query.to) {
       const lessonWhere = {};
       if (req.query.groupId) lessonWhere.groupId = req.query.groupId;
       if (req.query.month) {
         const [y, m] = req.query.month.split('-').map(Number);
         const start = `${y}-${String(m).padStart(2,'0')}-01`;
-        const end   = new Date(y, m, 0).toISOString().slice(0, 10);
+        const end   = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
         lessonWhere.date = { [Op.between]: [start, end] };
       } else {
         if (req.query.from || req.query.to) {
@@ -71,8 +105,66 @@ const getAll = async (req, res) => {
   }
 };
 
-// Создаёт или обновляет записи посещаемости (bulk).
-// Body: { lessonId?, individualLessonId?, records: [{studentId, present}] }
+// ── GET /attendance/pending — ожидающие подтверждения / спорные ───────────────────
+// Студент: свои pending_student записи
+// Учитель: pending_student + disputed записи по его урокам
+const getPending = async (req, res) => {
+  try {
+    await autoConfirmExpired();
+
+    let records;
+
+    if (req.user.role === 'student') {
+      records = await Attendance.findAll({
+        where: { studentId: req.user.id, status: { [Op.in]: ['pending_student', 'disputed'] } },
+        include: [
+          { model: Lesson,         attributes: ['id','date','time','topic'], required: false,
+            include: [{ model: Group, attributes: ['id','name'] }] },
+          { model: IndividualLesson, attributes: ['id','date','time','topic'], required: false },
+        ],
+        order: [['createdAt', 'DESC']],
+      });
+    } else {
+      // Учитель: собираем все его уроки
+      const groups = await Group.findAll({ where: { teacherId: req.user.id }, attributes: ['id'] });
+      const groupIds = groups.map(g => g.id);
+
+      const [lessons, indLessons] = await Promise.all([
+        groupIds.length
+          ? Lesson.findAll({ where: { groupId: { [Op.in]: groupIds } }, attributes: ['id'] })
+          : [],
+        IndividualLesson.findAll({ where: { teacherId: req.user.id }, attributes: ['id'] }),
+      ]);
+
+      const orConditions = [];
+      if (lessons.length)    orConditions.push({ lessonId:           { [Op.in]: lessons.map(l => l.id) } });
+      if (indLessons.length) orConditions.push({ individualLessonId: { [Op.in]: indLessons.map(l => l.id) } });
+
+      if (!orConditions.length) return res.json({ data: [] });
+
+      records = await Attendance.findAll({
+        where: {
+          [Op.or]:  orConditions,
+          status:   { [Op.in]: ['pending_student', 'disputed'] },
+        },
+        include: [
+          { model: Lesson,          attributes: ['id','date','time','topic'], required: false,
+            include: [{ model: Group, attributes: ['id','name'] }] },
+          { model: IndividualLesson, attributes: ['id','date','time','topic'], required: false },
+          { model: User, as: 'student', attributes: ['id','name','email'] },
+        ],
+        order: [['createdAt', 'DESC']],
+      });
+    }
+
+    res.json({ data: records });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Ошибка получения ожидающих записей' });
+  }
+};
+
+// ── POST /attendance — учитель отмечает посещаемость (bulk) ─────────────────────
 const create = async (req, res) => {
   try {
     const { lessonId, individualLessonId, records } = req.body;
@@ -83,20 +175,20 @@ const create = async (req, res) => {
       return res.status(400).json({ error: 'Нужен lessonId или individualLessonId' });
     }
 
-
-
-    // Ownership check
-
-    if ( !await isHwOwner({ lessonId, individualLessonId }, req.user.id) ) return res.status(403).json({ error: 'доступ запрещён' });
+    if (!await isHwOwner({ lessonId, individualLessonId }, req.user.id)) {
+      return res.status(403).json({ error: 'Доступ запрещён' });
+    }
 
     const rows = records.map(r => ({
       lessonId:           lessonId           ?? null,
       individualLessonId: individualLessonId ?? null,
-      studentId: r.studentId,
-      present:   r.present ?? false,
+      studentId:    r.studentId,
+      teacherMarked: r.present ?? false,
+      studentMarked: null,
+      present:      null,              // null = ожидает подтверждения студента
+      status:       'pending_student',
     }));
 
-    // Транзакция: удаляем старые записи урока, затем вставляем свежие
     const whereClause = lessonId ? { lessonId } : { individualLessonId };
     const t = await Attendance.sequelize.transaction();
     try {
@@ -114,21 +206,67 @@ const create = async (req, res) => {
   }
 };
 
-const update = async (req, res) => {
+// ── POST /attendance/:id/confirm — студент подтверждает или оспаривает ────────────
+const confirmStudent = async (req, res) => {
   try {
     const record = await Attendance.findByPk(req.params.id);
     if (!record) return res.status(404).json({ error: 'Запись не найдена' });
+    if (record.studentId !== req.user.id) return res.status(403).json({ error: 'Доступ запрещён' });
 
-    // Ownership check
-    if ( !await isHwOwner(record, req.user.id) ) return res.status(403).json({ error: 'доступ запрещён' });
+    const { present } = req.body;
+    if (typeof present !== 'boolean') {
+      return res.status(400).json({ error: 'present обязателен (true/false)' });
+    }
 
+    record.studentMarked = present;
 
-    await record.update({ present: req.body.present });
+    if (present === record.teacherMarked) {
+      record.status  = 'confirmed';
+      record.present = record.teacherMarked;
+    } else {
+      // Ответы разошлись — посещение НЕ засчитывается пока не разрешён спор
+      record.status  = 'disputed';
+      record.present = false;
+    }
+
+    await record.save();
     res.json({ data: record });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Ошибка обновления посещаемости' });
+    res.status(500).json({ error: 'Ошибка подтверждения' });
   }
 };
 
-module.exports = { getAll, create, update };
+// ── PUT /attendance/:id — учитель разрешает спор ─────────────────────────────────
+// body: { accept: true }  → принять версию студента
+// body: { accept: false } → настоять на своей версии
+const teacherResolve = async (req, res) => {
+  try {
+    const record = await Attendance.findByPk(req.params.id);
+    if (!record) return res.status(404).json({ error: 'Запись не найдена' });
+    if (!await isHwOwner(record, req.user.id)) return res.status(403).json({ error: 'Доступ запрещён' });
+
+    const { accept } = req.body;
+    if (typeof accept !== 'boolean') {
+      return res.status(400).json({ error: 'accept обязателен (true/false)' });
+    }
+
+    if (accept) {
+      // Принять позицию студента
+      record.teacherMarked = record.studentMarked;
+      record.present       = record.studentMarked;
+    } else {
+      // Настоять на своей позиции
+      record.studentMarked = record.teacherMarked;
+      record.present       = record.teacherMarked;
+    }
+    record.status = 'confirmed';
+    await record.save();
+    res.json({ data: record });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Ошибка разрешения спора' });
+  }
+};
+
+module.exports = { getAll, getPending, create, confirmStudent, teacherResolve };

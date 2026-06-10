@@ -218,9 +218,14 @@ const gradeSubmission = async (req, res) => {
 
     const sub = await HomeworkSubmission.findByPk(req.params.subId);
     if (!sub) return res.status(404).json({ error: 'Сдача не найдена' });
+    // Проверяем что сдача принадлежит именно этому ДЗ (не другому)
+    if (sub.homeworkId !== hw.id) return res.status(404).json({ error: 'Сдача не найдена' });
+
     // grade (0–100, целое) уже проверен схемой gradeSubmission.
+    // grade: null → сброс оценки обратно в pending.
     const { grade } = req.body;
-    await sub.update({ grade, status: 'graded' });
+    const isReset = grade === null || grade === undefined;
+    await sub.update({ grade: isReset ? null : grade, status: isReset ? 'pending' : 'graded' });
     res.json({ data: sub });
   } catch (err) {
     console.error(err);

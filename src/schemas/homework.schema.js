@@ -27,9 +27,12 @@ const submitHomework = z.object({
   comment: z.string().trim().optional(),
 });
 
-// PUT /homework/:id/submissions/:subId — оценка 0..100 (целое).
+// PUT /homework/:id/submissions/:subId — оценка 0..100 (целое) или null для сброса в pending.
 const gradeSubmission = z.object({
-  grade: z.number().int().min(0, 'Оценка 0–100').max(100, 'Оценка 0–100').optional(),
+  grade: z.union([
+    z.number().int().min(0, 'Оценка 0–100').max(100, 'Оценка 0–100'),
+    z.null(),
+  ]).optional(),
 });
 
 module.exports = { createHomework, updateHomework, submitHomework, gradeSubmission };

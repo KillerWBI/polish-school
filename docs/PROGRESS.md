@@ -22,7 +22,7 @@
 | **`helmet`** (CSP/HSTS/X-Frame-Options) | ✅ 2026-05-21 |
 | **JSON body limit 256kb** | ✅ 2026-05-21 |
 | **Rate-limit на `/auth/register*`** (5/15мин) | ✅ 2026-05-21 |
-| **Env validation при старте** (`JWT_SECRET`, `DB_URL`, `TEACHER_SECRET`) | ✅ 2026-05-21 |
+| **Env validation при старте** (`JWT_SECRET`, `DB_URL`) | ✅ 2026-05-21 |
 
 ---
 
@@ -37,8 +37,8 @@
 | Individual Courses | ✅ | — |
 | Individual Lessons | ✅ | — |
 | Homework | ✅ | Multi-tenancy дыры закрыты 2026-05-31 (#1-#3). Zod-валидация подключена (референс-модуль) |
-| Attendance | ✅ | — |
-| Payments | ✅ | Multi-tenancy дыра закрыта 2026-05-31 (#4). Остаётся N+1 в `calculate` (низкий приоритет) |
+| Attendance | ✅ | Dual confirmation: `pending_student → confirmed/disputed`. Авто-confirm через 3 дня. Migration `20260609000001` нужна на сервере (`npm run db:migrate`). Полное описание → [ATTENDANCE-CONFIRMATION.md](ATTENDANCE-CONFIRMATION.md) |
+| Payments | ✅ | Multi-tenancy дыра закрыта 2026-05-31 (#4). N+1 в групповой части `calculate` убран (TASK-7, 2026-06-08); в индивидуальной части N+1 ещё остаётся. `endDate` timezone fix 2026-06-09 |
 
 ---
 
@@ -55,7 +55,17 @@
 - [x] **#5** Убрать gender-heuristic в `dashboard.controller` — ✅ 2026-05-31 (заменён `endsWith('а')` на нейтральное `сдал(а)`/`оплатил(а)`, TASK-1)
 - [x] **#6** Валидация `deadline >= now` в `homework.create` — ✅ 2026-05-31 (`isNaN(getTime())` ловит битую дату + `deadlineDate < new Date()` ловит прошлое)
 - [x] **#7** Валидация `month` (не future) в `payment.calculate` — ✅ 2026-06-02 (TASK-2, сравнение строк `YYYY-MM`)
-- [ ] **#8** N+1 в `payment.calculate` — заменить циклы на один SQL с GROUP BY
+- [x] **#8** N+1 в `payment.calculate` — ✅ TASK-7 групповая часть (2026-06-08). Индивидуальная — B2 в бэклоге
+
+### ✅ Ревью-3 (2026-06-09) — BUG-1..BUG-8 все закрыты
+
+- [x] **BUG-1** `endDate` timezone fix — `Date.UTC(year, mon, 0)` вместо `new Date(year, mon, 0)` в `payment.controller`, `dashboard.controller` (×2), `attendance.controller`
+- [x] **BUG-3** `gradeSubmission` — grade reset: `grade: null` → `status: 'pending'`; схема расширена `z.union([z.number(), z.null()])`
+- [x] **BUG-4** Rate-limit на `/auth/verify-email` + `/auth/resend-verification` (10/15мин) добавлен в `app.js`
+- [x] **BUG-5** Timing-safe login — dummy bcrypt.compare при отсутствии юзера → защита от timing-attack email enumeration
+- [x] **BUG-6** `lesson.getOne` — добавлена ownership-проверка для teacher-роли (раньше только студент проверялся)
+- [x] **BUG-7** `gradeSubmission` — проверка `sub.homeworkId === hw.id` (нельзя грейдить сдачу с другого ДЗ)
+- [x] **BUG-8** `updatePaymentSchema` — `paid` теперь обязательный, не `.optional()` (был silent no-op)
 
 ### ✅ Выполнено
 - [x] `homework.create/update/delete` — ownership check
@@ -98,7 +108,8 @@
 - [ ] Раскатать на остальные модули (auth, user, individualCourse, individualLesson, attendance) → [TASKS.md](../../TASKS.md) секция «Бэклог» (B1/B2, техдолг)
 
 ### ⚪ Низкий приоритет
-- [ ] N+1 в `payment.calculate` — заменить на JOIN
+- [x] N+1 в `payment.calculate` (групповая часть) — ✅ TASK-7 (2026-06-08), один findAll с include вместо циклов
+- [ ] N+1 в `payment.calculate` (индивидуальная часть) — цикл `Attendance.findOne` на каждый урок ещё остаётся
 - [ ] Очистить `buildDateWhere` в `lesson.controller.js`
 - [ ] `GET /payments/debt/:studentId`
 - [ ] Refresh token
@@ -134,3 +145,6 @@
 | 2026-06-04 | **TASK-3 (готово):** Zod для `payment` — calculate (+refine «не будущее»), update, paginationQuery. Порядок middleware `auth, isTeacher, validate`. Express 5: `req.query` getter → `validate` пишет в `req.validatedQuery`. |
 | 2026-06-04 | **TASK-4 (готово):** Zod для `group` (create/update/addStudent + scheduleSlot day0-6/HH:MM) и `lesson` (create/update, uuid+date+time). Контроллеры очищены от ручных `if`. |
 | 2026-06-07 | **TASK-6 (готово):** ownership-проверка вынесена в `utils/ownership.js` — чистый предикат `isHwOwner({lessonId,individualLessonId}, teacherId) → boolean`. Дубли убраны из `homework` (5 мест) и `attendance` (create/update). Выбран helper, а не middleware (id то в body, то в params; полиморфизм; сущность нужна дальше). Граница: utils = «да/нет», контроллер = HTTP 403. |
+| 2026-06-08 | **TASK-7 (готово, групповая часть):** убран N+1 в `payment.calculate` — вместо вложенных циклов (≈50 запросов) один `Attendance.findAll` с include Lesson→Group (оба `required`, фильтр present/дата/teacherId) + перебор в JS, сумма в `totals`. ORM-путь, не raw-SQL. Изменение семантики: начисляем всем, кто посещал (ушедшие из группы теперь начисляются; нулевые Payment для не-посещавших больше не создаются). Индивидуальная часть N+1 — не тронута. |
+| 2026-06-09 | **Ревью-3:** закрыты BUG-1..BUG-8. Timing-safe login (dummy bcrypt), timezone `endDate` fix в 4 файлах (`Date.UTC`), rate-limit на verify-email/resend, `lesson.getOne` ownership для teacher, `gradeSubmission` проверка sub↔hw, grade reset (`null`→`pending`), `updatePaymentSchema` `paid` обязателен. |
+| 2026-06-10 | **Dual attendance confirmation:** миграция `20260609000001-add-attendance-confirmation` (поля `teacherMarked`, `studentMarked`, `status` ENUM + backfill + nullable `present`). Контроллер переписан: `create` → `pending_student`, `getPending` (учитель/студент), `confirmStudent` (студент), `teacherResolve` (accept/reject спор). Авто-подтверждение через 3 дня (raw SQL JOIN). Фронт: 3-таба UI (Журнал/Ожидают(N)/Спорные(N)) + `confirmAttendance`/`resolveAttendanceDispute` в API. |

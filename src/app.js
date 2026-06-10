@@ -47,6 +47,17 @@ const registerLimiter = rateLimit({
 app.use('/api/v1/auth/register',         registerLimiter);
 app.use('/api/v1/auth/register-teacher', registerLimiter);
 
+// Защита от брутфорса токенов верификации (10 попыток / 15 мин на IP)
+const verifyLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Слишком много попыток. Попробуйте через 15 минут.' },
+});
+app.use('/api/v1/auth/verify-email',       verifyLimiter);
+app.use('/api/v1/auth/resend-verification', verifyLimiter);
+
 // Мониторинг / health check
 app.get('/health', (req, res) => res.json({ status: 'ok', uptime: process.uptime() }));
 

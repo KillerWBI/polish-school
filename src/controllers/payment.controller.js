@@ -61,31 +61,57 @@ const calculate = async (req, res) => {
     const { month } = req.body;
     const [year, mon] = month.split('-').map(Number);
     const startDate = `${year}-${String(mon).padStart(2, '0')}-01`;
-    const endDate   = new Date(year, mon, 0).toISOString().slice(0, 10);
+    // Date.UTC избегает локальной TZ: new Date(year, mon, 0) зависит от TZ сервера
+    const endDate   = new Date(Date.UTC(year, mon, 0)).toISOString().slice(0, 10);
 
     // totals[studentId] = суммарная сумма за месяц
+    // выглядет вот такЖ totals = {
+    //   123: 1500, // студент 123 должен 1500 руб
+    //   456: 2000,
+    // }
     const totals = new Map();
 
     // ── 1. Групповые уроки ──────────────────────────────────────────────────
-    const groups = await Group.findAll({ where: { teacherId: req.user.id } });
 
-    for (const group of groups) {
-      const memberships = await GroupStudent.findAll({ where: { groupId: group.id } });
+    // отдает вот так поллный ответ вот так:
+    // [
+    //   {
+    //     id: 1,
+    //     present: true,
+    //     studentId: 123,
+    //     lessonId: 10,
+    //     Lesson: {
+    //       id: 10,
+    //       date: '2026-05-15',
+    //       groupId: 5,
+    //       Group: {
+    //         id: 5,
+    //         teacherId: 999,
+    //         pricePerLesson: '500.00'
+    //       }
+    //     }
+    //   },
+    //   ...
+    // ]
+    const atandances = await Attendance.findAll({
+      where: { present: true},
+      include: [{
+        model: Lesson,
+        where: { date: { [Op.between]: [startDate, endDate] } },
+        required: true,
+        include: [{
+          model: Group,
+          required: true,
+          where: { teacherId: req.user.id },
+        }]
+      }],
 
-      for (const m of memberships) {
-        const attendances = await Attendance.findAll({
-          where: { studentId: m.studentId, present: true },
-          include: [{
-            model: Lesson,
-            where: { groupId: group.id, date: { [Op.between]: [startDate, endDate] } },
-            required: true,
-          }],
-        });
+    });
+   for(const a of  atandances) {
+    const price = parseFloat(a.Lesson.Group.pricePerLesson);
+    totals.set( a.studentId, (totals.get(a.studentId) ?? 0) + price );
+   }
 
-        const amount = attendances.length * parseFloat(group.pricePerLesson);
-        totals.set(m.studentId, (totals.get(m.studentId) ?? 0) + amount);
-      }
-    }
 
     // ── 2. Индивидуальные уроки ─────────────────────────────────────────────
     const indLessons = await IndividualLesson.findAll({

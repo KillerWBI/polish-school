@@ -95,12 +95,11 @@ const login = async (req, res) => {
     }
 
     const user = await User.findOne({ where: { email } });
-    if (!user) {
-      return res.status(401).json({ error: 'Неверный email или пароль' });
-    }
-
-    const valid = await bcrypt.compare(password, user.password);
-    if (!valid) {
+    // Всегда вызываем bcrypt.compare — иначе «нет юзера» быстрее «неверный пароль»,
+    // и можно угадать email-базу по времени ответа (timing attack).
+    const dummyHash = '$2a$10$abcdefghijklmnopqrstuvuXXXXXXXXXXXXXXXXXXXXXXXXXXX';
+    const valid = await bcrypt.compare(password, user ? user.password : dummyHash);
+    if (!user || !valid) {
       return res.status(401).json({ error: 'Неверный email или пароль' });
     }
 

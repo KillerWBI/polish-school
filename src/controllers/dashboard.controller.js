@@ -12,7 +12,7 @@ const buildTeacherDashboard = async (teacherId) => {
   const currentMonth = today.slice(0, 7);
   const [year, mon]  = currentMonth.split('-').map(Number);
   const monthStart   = `${currentMonth}-01`;
-  const monthEnd     = new Date(year, mon, 0).toISOString().slice(0, 10);
+  const monthEnd     = new Date(Date.UTC(year, mon, 0)).toISOString().slice(0, 10);
 
   const groups = await Group.findAll({ where: { teacherId }, attributes: ['id', 'name'] });
   const groupIds = groups.map(g => g.id);
@@ -157,7 +157,7 @@ const buildStudentDashboard = async (studentId) => {
   const currentMonth = today.slice(0, 7);
   const [year, mon]  = currentMonth.split('-').map(Number);
   const monthStart   = `${currentMonth}-01`;
-  const monthEnd     = new Date(year, mon, 0).toISOString().slice(0, 10);
+  const monthEnd     = new Date(Date.UTC(year, mon, 0)).toISOString().slice(0, 10);
   const next7Days    = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
   // Группы студента
