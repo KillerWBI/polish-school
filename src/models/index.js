@@ -7,7 +7,10 @@ const IndividualLesson = require('./IndividualLesson');
 const Homework = require('./Homework');
 const HomeworkSubmission = require('./HomeworkSubmission');
 const Attendance = require('./Attendance');
-const Payment = require('./Payment');
+const Follow = require('./Follow');
+const LessonRequest = require('./LessonRequest');
+const TeacherStudent = require('./TeacherStudent');
+const PaymentRecord = require('./PaymentRecord');
 
 // Group ↔ User (teacher)
 Group.belongsTo(User, { foreignKey: 'teacherId', as: 'teacher' });
@@ -49,9 +52,21 @@ Attendance.belongsTo(Lesson, { foreignKey: 'lessonId' });
 Attendance.belongsTo(IndividualLesson, { foreignKey: 'individualLessonId' });
 Attendance.belongsTo(User, { foreignKey: 'studentId', as: 'student' });
 
-// Payment ↔ User
-Payment.belongsTo(User, { foreignKey: 'studentId', as: 'student' });
-User.hasMany(Payment, { foreignKey: 'studentId' });
+// Follow ↔ User (подписка: follower → following)
+Follow.belongsTo(User, { foreignKey: 'followerId',  as: 'follower' });
+Follow.belongsTo(User, { foreignKey: 'followingId', as: 'following' });
+
+// LessonRequest ↔ User (студент-заявитель + учитель-получатель)
+LessonRequest.belongsTo(User, { foreignKey: 'studentId', as: 'student' });
+LessonRequest.belongsTo(User, { foreignKey: 'teacherId', as: 'teacher' });
+
+// TeacherStudent ↔ User (отношение «мой ученик»)
+TeacherStudent.belongsTo(User, { foreignKey: 'studentId', as: 'student' });
+TeacherStudent.belongsTo(User, { foreignKey: 'teacherId', as: 'teacher' });
+
+// PaymentRecord ↔ User (платёж: от ученика — учителю)
+PaymentRecord.belongsTo(User, { foreignKey: 'studentId', as: 'student' });
+PaymentRecord.belongsTo(User, { foreignKey: 'teacherId', as: 'teacher' });
 
 module.exports = {
   User,
@@ -63,5 +78,8 @@ module.exports = {
   Homework,
   HomeworkSubmission,
   Attendance,
-  Payment,
+  Follow,
+  LessonRequest,
+  TeacherStudent,
+  PaymentRecord,
 };

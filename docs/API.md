@@ -73,8 +73,8 @@ Response format:
 Query: `?period=day|week|month` (default `month`)
 
 Возвращает агрегаты для графиков:
-- `revenueByPeriod` — два ряда `paid` (по `paidAt`) и `charged` (по `createdAt` платежа). `day` → 30 точек, `week` → 12, `month` → 6
-- `studentsByMonth` — активные студенты по месяцам (последние 6). «Активен» = был Payment с этим month
+- `revenueByPeriod` — два ряда `paid` (реальные деньги из `PaymentRecord` по `paidAt`) и `charged` (начислено/оборот из подтверждённых посещений по дате урока). `day` → 30 точек, `week` → 12, `month` → 6
+- `studentsByMonth` — активные студенты по месяцам (последние 6). «Активен» = был на подтверждённом посещении (present=true) в этом месяце
 - `avgAttendance` — общий % посещаемости по всем урокам учителя (число 0-100)
 - `totals` — `{ students, groups, lessons }` для статов в профиле
 
@@ -425,31 +425,39 @@ GET /users/@ivan_petrov/profile
 
 ## Payments
 
+Новая модель (с 2026-06-22): помесячная система `Payment` удалена. **Долг считается живьём** из подтверждённых посещений (`charged`), факт оплаты — отдельные строки в `PaymentRecord` (`paid`). `balance = charged − paid`.
+
 | Method | Path | Auth | Role | Описание |
 |--------|------|------|------|----------|
-| GET | `/payments` | ✅ | teacher/student | Оплаты (student — свои) |
-| POST | `/payments/calculate` | ✅ | teacher | Рассчитать оплату за месяц |
-| PUT | `/payments/:id` | ✅ | teacher | Отметить оплачено / нет |
+| GET | `/payments/debt` | ✅ | student | Мой долг по каждому учителю |
+| GET | `/payments/debts` | ✅ | teacher | Долг каждого моего ученика |
+| POST | `/payments/record` | ✅ | teacher | Внести оплату от ученика |
 
-### POST /payments/calculate
+### GET /payments/debt (студент)
 ```json
-// Body
-{ "month": "2026-05" }
-
-// Логика: для каждого студента каждой группы учителя:
-//   amount = кол-во присутствий за месяц × group.pricePerLesson
-// findOrCreate: не дублирует при повторном вызове, обновляет amount если изменился
-
-// Response 200
-{ "data": [{ "id", "studentId", "month", "amount", "paid", "paidAt" }] }
+// studentId берётся из токена
+// Response 200 — массив по каждому учителю
+{ "data": [{ "teacher": { "id", "name", "email" }, "charged", "paid", "balance" }] }
+// charged — сумма цен подтверждённых посещений (present=true)
+// paid    — сумма PaymentRecord от этого студента этому учителю
 ```
 
-### PUT /payments/:id
+### GET /payments/debts (учитель)
 ```json
-// Body
-{ "paid": true }
-// paid=true  → paidAt = NOW()
-// paid=false → paidAt = null
+// teacherId берётся из токена
+// Response 200 — массив по каждому ученику
+{ "data": [{ "student": { "id", "name", "email" }, "charged", "paid", "balance" }] }
+```
+
+### POST /payments/record (учитель)
+```json
+// Body (Zod recordPaymentSchema)
+{ "studentId": "<uuid>", "amount": 150 }   // amount > 0
+// Проверка: studentId должен быть принятым учеником (TeacherStudent).
+// teacherId и paidAt проставляет сервер.
+
+// Response 201
+{ "data": { "id", "studentId", "teacherId", "amount", "paidAt" } }
 ```
 
 ---

@@ -1,8 +1,9 @@
 const {
-  Group, GroupStudent, Lesson, IndividualLesson, IndividualCourse,
-  Homework, HomeworkSubmission, Attendance, Payment, User,
+  Group, GroupStudent, Lesson, IndividualLesson,
+  Homework, HomeworkSubmission, Attendance, PaymentRecord, User,
 } = require('../models');
 const { Op } = require('sequelize');
+const { getTeacherDebtTotal, getStudentDebtTotal } = require('./payment.controller');
 
 /* ════════════════════════════════════════════════════════════════════════
    УЧИТЕЛЬ
@@ -60,26 +61,8 @@ const buildTeacherDashboard = async (teacherId) => {
     }
   }
 
-  // 3. Долг студентов
-  const [groupStudentRows, indCourseRows] = await Promise.all([
-    groupIds.length
-      ? GroupStudent.findAll({ where: { groupId: { [Op.in]: groupIds } }, attributes: ['studentId'] })
-      : Promise.resolve([]),
-    IndividualCourse.findAll({ where: { teacherId }, attributes: ['studentId'] }),
-  ]);
-  const allStudentIds = [...new Set([
-    ...groupStudentRows.map(r => r.studentId),
-    ...indCourseRows.map(r => r.studentId),
-  ])];
-
-  let totalDebt = 0;
-  if (allStudentIds.length) {
-    const unpaid = await Payment.findAll({
-      where: { studentId: { [Op.in]: allStudentIds }, paid: false },
-      attributes: ['amount'],
-    });
-    totalDebt = unpaid.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
-  }
+  // 3. Долг студентов — из PaymentRecord (начислено − оплачено по каждому ученику)
+  const totalDebt = await getTeacherDebtTotal(teacherId);
 
   // 4. Посещаемость месяца
   const [monthLessons, monthIndLessons] = await Promise.all([
@@ -234,12 +217,8 @@ const buildStudentDashboard = async (studentId) => {
     if (total > 0) attendancePercent = Math.round((present / total) * 100);
   }
 
-  // 4. Мой долг
-  const unpaid = await Payment.findAll({
-    where: { studentId, paid: false },
-    attributes: ['amount'],
-  });
-  const myDebt = unpaid.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+  // 4. Мой долг — из PaymentRecord (начислено − оплачено по всем учителям)
+  const myDebt = await getStudentDebtTotal(studentId);
 
   // 5. Ближайшие уроки
   const [upcomingGroup, upcomingInd] = await Promise.all([
@@ -341,27 +320,14 @@ const buildTeacherActivity = async (teacherId) => {
     }
   }
 
-  const [groupStudentRows, indCourseRows] = await Promise.all([
-    groupIds.length
-      ? GroupStudent.findAll({ where: { groupId: { [Op.in]: groupIds } }, attributes: ['studentId'] })
-      : Promise.resolve([]),
-    IndividualCourse.findAll({ where: { teacherId }, attributes: ['studentId'] }),
-  ]);
-  const allStudentIds = [...new Set([
-    ...groupStudentRows.map(r => r.studentId),
-    ...indCourseRows.map(r => r.studentId),
-  ])];
-
-  let payments = [];
-  if (allStudentIds.length) {
-    payments = await Payment.findAll({
-      where: { studentId: { [Op.in]: allStudentIds }, paid: true },
-      include: [{ model: User, as: 'student', attributes: ['id', 'name'] }],
-      order: [['updatedAt', 'DESC']],
-      limit: 10,
-      attributes: ['id', 'amount', 'month', 'updatedAt'],
-    });
-  }
+  // События оплат — из PaymentRecord (teacherId лежит в самой записи, по paidAt).
+  const payments = await PaymentRecord.findAll({
+    where: { teacherId },
+    include: [{ model: User, as: 'student', attributes: ['id', 'name'] }],
+    order: [['paidAt', 'DESC']],
+    limit: 10,
+    attributes: ['id', 'amount', 'paidAt'],
+  });
 
   return [
     ...submissions.map(s => ({
@@ -374,8 +340,8 @@ const buildTeacherActivity = async (teacherId) => {
     ...payments.map(p => ({
       id:   `pay-${p.id}`,
       type: 'payment',
-      text: `${p.student?.name ?? '?'} оплатил(а) ${p.month} — ${p.amount} zł`,
-      at:   p.updatedAt,
+      text: `${p.student?.name ?? '?'} оплатил(а) ${p.amount} zł`,
+      at:   p.paidAt,
       extra: null,
     })),
   ].sort((a, b) => new Date(b.at) - new Date(a.at)).slice(0, 15);
@@ -391,12 +357,12 @@ const buildStudentActivity = async (studentId) => {
     attributes: ['id', 'status', 'grade', 'createdAt', 'updatedAt'],
   });
 
-  // Мои оплаты (paid=true)
-  const payments = await Payment.findAll({
-    where: { studentId, paid: true },
-    order: [['updatedAt', 'DESC']],
+  // Мои оплаты — из PaymentRecord (по paidAt)
+  const payments = await PaymentRecord.findAll({
+    where: { studentId },
+    order: [['paidAt', 'DESC']],
     limit: 10,
-    attributes: ['id', 'amount', 'month', 'updatedAt'],
+    attributes: ['id', 'amount', 'paidAt'],
   });
 
   return [
@@ -416,8 +382,8 @@ const buildStudentActivity = async (studentId) => {
     ...payments.map(p => ({
       id:   `pay-${p.id}`,
       type: 'payment',
-      text: `Оплачено ${p.month} — ${p.amount} zł`,
-      at:   p.updatedAt,
+      text: `Оплачено ${p.amount} zł`,
+      at:   p.paidAt,
       extra: null,
     })),
   ].sort((a, b) => new Date(b.at) - new Date(a.at)).slice(0, 15);

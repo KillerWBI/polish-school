@@ -1,4 +1,4 @@
-const { Payment, Attendance, Lesson, IndividualLesson, Group, GroupStudent, IndividualCourse, User } = require('../models');
+const { PaymentRecord, Attendance, Lesson, IndividualLesson, Group, GroupStudent, IndividualCourse, User, TeacherStudent } = require('../models');
 const { Op } = require('sequelize');
 
 // id студентов учителя: через его группы (GroupStudent) + индивидуальные курсы.
@@ -20,169 +20,178 @@ const getTeacherStudentIds = async (teacherId) => {
   ])];
 };
 
-const getAll = async (req, res) => {
-  try {
-    // page/limit уже проверены и приведены к числам схемой paginationQuery (validate 'query').
-    const { page, limit } = req.validatedQuery;
-    const offset = (page - 1) * limit;
+const getStudentDebtTotal = async (studentId) => {
+  // Начислено по каждому учителю (из посещений)
+  const charged = await computeChargedByTeacher(studentId);
 
-    // S4: учитель видит платежи ТОЛЬКО своих студентов (не всех в БД).
-    let where;
-    if (req.user.role === 'student') {
-      where = { studentId: req.user.id };
-    } else {
-      const studentIds = await getTeacherStudentIds(req.user.id);
-      if (studentIds.length === 0) {
-        return res.json({ data: [], pagination: { page, limit, total: 0, pages: 0 } });
-      }
-      where = { studentId: { [Op.in]: studentIds } };
-    }
+  const records = await PaymentRecord.findAll({
+    where: { studentId },
+    attributes: ['teacherId', 'amount'],
+  });
+  // Map: teacherId → сумма оплаченного
+  const paid = new Map();
+  for (const r of records) {
+    paid.set(r.teacherId, (paid.get(r.teacherId) ?? 0) + parseFloat(r.amount));
+  }
+  // Вычисляем долг по каждому учителю: сколько начислено минус сколько оплачено.
+  const debt = {};
+  for (const [teacherId, amount] of charged) {
+    debt[teacherId] = amount - (paid.get(teacherId) ?? 0);
+  }
 
-    const { count, rows } = await Payment.findAndCountAll({
-      where,
-      include: [{ model: User, as: 'student', attributes: ['id', 'name', 'email'] }],
-      order: [['month', 'DESC']],
-      limit,
-      offset,
-      distinct: true,
+  const allAmount = Object.values(debt).reduce( (sum, amt) => sum + amt , 0);
+  return Math.max(allAmount, 0); // переплата не уводит долг в минус
+
+};
+
+// Сколько учителю должны ВСЕ его ученики суммарно (для KPI дашборда).
+// По каждому ученику: начислено мной − оплачено мне, кламп ≥0,
+// чтобы переплата одного не маскировала долг другого.
+const getTeacherDebtTotal = async (teacherId) => {
+  const studentIds = await getTeacherStudentIds(teacherId);
+  let total = 0;
+  for (const studentId of studentIds) {
+    const charged = await computeChargedByTeacher(studentId);
+    const chargedByMe = charged.get(teacherId) ?? 0;
+
+    const records = await PaymentRecord.findAll({
+      where: { studentId, teacherId },
+      attributes: ['amount'],
     });
-    res.json({ data: rows, pagination: { page, limit, total: count, pages: Math.ceil(count / limit) } });
+    const paidToMe = records.reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0);
+
+    total += Math.max(chargedByMe - paidToMe, 0);
+  }
+  return total;
+};
+
+// Начислено студенту по каждому учителю: сумма цен подтверждённых посещений.
+// Возвращает Map: teacherId → число (сумма в валюте).
+const computeChargedByTeacher = async (studentId) => {
+  const charged = new Map();
+
+  // Групповые посещения: Attendance → Lesson → Group (teacherId + pricePerLesson)
+  const groupAttendances = await Attendance.findAll({
+    where: { studentId, present: true },
+    include: [{
+      model: Lesson,
+      required: true,
+      include: [{ model: Group, required: true, attributes: ['teacherId', 'pricePerLesson'] }],
+    }],
+  });
+  for (const a of groupAttendances) {
+    const { teacherId, pricePerLesson } = a.Lesson.Group;
+    const price = parseFloat(pricePerLesson) || 0;
+    charged.set(teacherId, (charged.get(teacherId) ?? 0) + price);
+  }
+
+  // Индивидуальные посещения: Attendance → IndividualLesson (teacherId + pricePerLesson)
+  const indAttendances = await Attendance.findAll({
+    where: { studentId, present: true },
+    include: [{
+      model: IndividualLesson,
+      required: true,
+      attributes: ['teacherId', 'pricePerLesson'],
+    }],
+  });
+  for (const a of indAttendances) {
+    const { teacherId, pricePerLesson } = a.IndividualLesson;
+    const price = parseFloat(pricePerLesson) || 0;
+    charged.set(teacherId, (charged.get(teacherId) ?? 0) + price);
+  }
+
+  return charged;
+};
+
+// POST /payments/record — учитель вносит оплату от ученика
+const recordPayment = async (req, res) => {
+  try {
+    const teacherId = req.user.id;
+    const { studentId, amount } = req.body;
+
+    const link = await TeacherStudent.findOne({ where: { teacherId, studentId } });
+    if (!link) return res.status(403).json({ error: 'Этот студент не является вашим учеником' });
+
+    const record = await PaymentRecord.create({ studentId, teacherId, amount });
+    res.status(201).json({ data: record });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Ошибка получения оплат' });
+    res.status(500).json({ error: 'Ошибка записи оплаты' });
   }
 };
 
-// Рассчитывает оплату за месяц: групповые + индивидуальные уроки.
-// Body: { month: "2026-05" }
-const calculate = async (req, res) => {
+// GET /payments/debt — студент видит долг по каждому учителю
+const getDebt = async (req, res) => {
   try {
-    // Формат YYYY-MM и «не будущее» проверены схемой calculatePaymentSchema.
-    const { month } = req.body;
-    const [year, mon] = month.split('-').map(Number);
-    const startDate = `${year}-${String(mon).padStart(2, '0')}-01`;
-    // Date.UTC избегает локальной TZ: new Date(year, mon, 0) зависит от TZ сервера
-    const endDate   = new Date(Date.UTC(year, mon, 0)).toISOString().slice(0, 10);
+    const studentId = req.user.id;
 
-    // totals[studentId] = суммарная сумма за месяц
-    // выглядет вот такЖ totals = {
-    //   123: 1500, // студент 123 должен 1500 руб
-    //   456: 2000,
-    // }
-    const totals = new Map();
+    // Начислено по каждому учителю (из посещений)
+    const charged = await computeChargedByTeacher(studentId);
 
-    // ── 1. Групповые уроки ──────────────────────────────────────────────────
-
-    // отдает вот так поллный ответ вот так:
-    // [
-    //   {
-    //     id: 1,
-    //     present: true,
-    //     studentId: 123,
-    //     lessonId: 10,
-    //     Lesson: {
-    //       id: 10,
-    //       date: '2026-05-15',
-    //       groupId: 5,
-    //       Group: {
-    //         id: 5,
-    //         teacherId: 999,
-    //         pricePerLesson: '500.00'
-    //       }
-    //     }
-    //   },
-    //   ...
-    // ]
-    const atandances = await Attendance.findAll({
-      where: { present: true},
-      include: [{
-        model: Lesson,
-        where: { date: { [Op.between]: [startDate, endDate] } },
-        required: true,
-        include: [{
-          model: Group,
-          required: true,
-          where: { teacherId: req.user.id },
-        }]
-      }],
-
+    // Оплачено по каждому учителю (из PaymentRecord)
+    const records = await PaymentRecord.findAll({
+      where: { studentId },
+      attributes: ['teacherId', 'amount'],
     });
-   for(const a of  atandances) {
-    const price = parseFloat(a.Lesson.Group.pricePerLesson);
-    totals.set( a.studentId, (totals.get(a.studentId) ?? 0) + price );
-   }
+    const paid = new Map();
+    for (const r of records) {
+      paid.set(r.teacherId, (paid.get(r.teacherId) ?? 0) + parseFloat(r.amount));
+    }
 
+    // Объединяем все teacherId из обоих источников
+    const teacherIds = [...new Set([...charged.keys(), ...paid.keys()])];
+    if (teacherIds.length === 0) return res.json({ data: [] });
 
-    // ── 2. Индивидуальные уроки ─────────────────────────────────────────────
-    const indLessons = await IndividualLesson.findAll({
-      where: {
-        teacherId: req.user.id,
-        date: { [Op.between]: [startDate, endDate] },
-      },
+    const teachers = await User.findAll({
+      where: { id: teacherIds },
+      attributes: ['id', 'name', 'email'],
+    });
+    const teacherMap = new Map(teachers.map(t => [t.id, t]));
+
+    const data = teacherIds.map(teacherId => {
+      const chargedAmt = charged.get(teacherId) ?? 0;
+      const paidAmt    = paid.get(teacherId) ?? 0;
+      return {
+        teacher: teacherMap.get(teacherId),
+        charged: chargedAmt,
+        paid:    paidAmt,
+        balance: chargedAmt - paidAmt,
+      };
     });
 
-    for (const lesson of indLessons) {
-      const attended = await Attendance.findOne({
-        where: { individualLessonId: lesson.id, studentId: lesson.studentId, present: true },
+    res.json({ data });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Ошибка получения долга' });
+  }
+};
+
+//[{ student: {id, name, email}, charged, paid, balance }]
+const getDebtsForTeacher = async (req, res) => {
+  try {
+    const studentIds = await getTeacherStudentIds(req.user.id);
+    if (studentIds.length === 0) {
+      return res.json({ data: [] });
+    }
+    const students = await User.findAll ({ where: { id: studentIds }, attributes: ['id', 'name', 'email'] });
+    const data = [];
+    for (const student of students) {
+      const charged = await computeChargedByTeacher(student.id);
+      const paidRecords = await PaymentRecord.findAll({ where: { studentId: student.id , teacherId: req.user.id}, attributes: ['amount'] });
+      //получаем в таком виде: [{amount: 100}, {amount: 200}]
+      const paid = paidRecords.reduce( (sum, record) => sum + parseFloat(record.amount) || 0, 0 );
+      data.push({
+        student,
+        charged: charged.get(req.user.id) ?? 0,
+        paid: paid,
+        balance: (charged.get(req.user.id) ?? 0) - paid,
       });
-      if (!attended) continue;
-
-      const price = parseFloat(lesson.pricePerLesson) || 0;
-      totals.set(lesson.studentId, (totals.get(lesson.studentId) ?? 0) + price);
     }
-
-    // ── 3. Запись в Payment (атомарный upsert на студента) ──────────────────
-    const results = await Payment.sequelize.transaction(async (t) => {
-      const out = [];
-      for (const [studentId, amount] of totals) {
-        const [payment, created] = await Payment.findOrCreate({
-          where: { studentId, month },
-          defaults: { amount, paid: false },
-          transaction: t,
-        });
-
-        if (!created && parseFloat(payment.amount) !== amount) {
-          await payment.update({ amount }, { transaction: t });
-        }
-        out.push(payment);
-      }
-      return out;
-    });
-
-    res.json({ data: results });
+    res.json({data});
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Ошибка расчёта оплаты' });
+    res.status(500).json({ error: 'Ошибка получения долгов' });
   }
 };
 
-
-const update = async (req, res) => {
-  try {
-    const payment = await Payment.findByPk(req.params.id, {
-      include: [{ model: User, as: 'student', attributes: ['id'] }],
-    });
-    if (!payment) return res.status(404).json({ error: 'Запись оплаты не найдена' });
-
-    // Проверяем что этот студент учится у данного учителя — через группу ИЛИ инд. курс
-    const isOwnGroup = await GroupStudent.findOne({
-      include: [{ model: Group, where: { teacherId: req.user.id }, required: true }],
-      where: { studentId: payment.studentId },
-    });
-    const isOwnIndividual = isOwnGroup ? null : await IndividualCourse.findOne({
-      where: { studentId: payment.studentId, teacherId: req.user.id },
-    });
-    if (!isOwnGroup && !isOwnIndividual) {
-      return res.status(403).json({ error: 'Доступ запрещён' });
-    }
-
-    const { paid } = req.body;
-    await payment.update({ paid, paidAt: paid ? new Date() : null });
-    res.json({ data: payment });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Ошибка обновления оплаты' });
-  }
-};
-
-module.exports = { getAll, calculate, update };
+module.exports = { computeChargedByTeacher, getDebt, recordPayment, getDebtsForTeacher, getStudentDebtTotal, getTeacherDebtTotal };

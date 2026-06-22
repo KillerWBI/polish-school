@@ -1,17 +1,17 @@
-const { User } = require('../models');
+const { User, Follow, TeacherStudent, LessonRequest } = require('../models');
 
 // Поля, которые возвращаем в публичном профиле (без email, password, токенов)
 const PUBLIC_PROFILE_FIELDS = [
   'id', 'name', 'username', 'role',
   'avatar', 'coverImage', 'bio',
-  'socialTelegram', 'socialWhatsApp', 'socialLinkedIn',
+  'socialTelegram', 'socialWhatsApp', 'socialLinkedIn', 'socialInstagram', 'phone',
   'languages', 'createdAt',
 ];
 
 // Поля, которые пользователь может править в своём профиле
 const EDITABLE_PROFILE_FIELDS = [
   'name', 'username', 'avatar', 'coverImage', 'bio',
-  'socialTelegram', 'socialWhatsApp', 'socialLinkedIn', 'languages',
+  'socialTelegram', 'socialWhatsApp', 'socialLinkedIn', 'socialInstagram', 'phone', 'languages',
 ];
 
 const USERNAME_RE = /^[a-z0-9_]{3,40}$/;
@@ -132,6 +132,49 @@ const updateProfile = async (req, res) => {
   }
 };
 
+// Отношение текущего зрителя к просматриваемому профилю.
+// Один блок вместо россыпи отдельных endpoint'ов (решение §2.5.6).
+const buildViewerContext = async (viewer, profile) => {
+  const ctx = {
+    isOwnProfile: viewer.id === profile.id,
+    isFollowing: false,
+    requestStatus: null, // pending | accepted | declined | null
+    isMyStudent: false,  // я (учитель) — наставник этого студента
+    isMyTeacher: false,  // этот учитель — мой наставник
+  };
+  if (ctx.isOwnProfile) return ctx;
+
+  // Все проверки отношения независимы → запускаем параллельно (Promise.all),
+  // а не одну за другой. Каждая дописывает свой флаг в ctx.
+  const tasks = [
+    Follow.findOne({ where: { followerId: viewer.id, followingId: profile.id }, attributes: ['id'] })
+      .then(r => { ctx.isFollowing = !!r; }),
+  ];
+
+  // Смотрю профиль учителя как студент → статус моей заявки + наставничество
+  if (profile.role === 'teacher' && viewer.role === 'student') {
+    tasks.push(
+      LessonRequest.findOne({
+        where: { studentId: viewer.id, teacherId: profile.id },
+        order: [['createdAt', 'DESC']], attributes: ['status'],
+      }).then(r => { ctx.requestStatus = r ? r.status : null; }),
+      TeacherStudent.findOne({ where: { teacherId: profile.id, studentId: viewer.id }, attributes: ['id'] })
+        .then(r => { ctx.isMyTeacher = !!r; }),
+    );
+  }
+
+  // Смотрю профиль студента как учитель → мой ли это ученик
+  if (profile.role === 'student' && viewer.role === 'teacher') {
+    tasks.push(
+      TeacherStudent.findOne({ where: { teacherId: viewer.id, studentId: profile.id }, attributes: ['id'] })
+        .then(r => { ctx.isMyStudent = !!r; }),
+    );
+  }
+
+  await Promise.all(tasks);
+  return ctx;
+};
+
 // GET /users/@:username/profile — публичный профиль (для всех авторизованных)
 const getPublicProfile = async (req, res) => {
   try {
@@ -141,11 +184,36 @@ const getPublicProfile = async (req, res) => {
       attributes: PUBLIC_PROFILE_FIELDS,
     });
     if (!user) return res.status(404).json({ error: 'Профиль не найден' });
-    res.json({ data: user });
+
+    // viewerContext и счётчик подписчиков независимы → параллельно
+    const [viewerContext, followersCount] = await Promise.all([
+      buildViewerContext(req.user, user),
+      Follow.count({ where: { followingId: user.id } }),
+    ]);
+
+    res.json({ data: { ...user.toJSON(), viewerContext, followersCount } });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Ошибка получения профиля' });
   }
 };
 
-module.exports = { getAll, getOne, update, updateProfile, getPublicProfile };
+// GET /users/me/students — список «моих учеников» (для StudentsPage и picker'а).
+// Только учитель (роут защищён isTeacher).
+const getMyStudents = async (req, res) => {
+  try {
+    const links = await TeacherStudent.findAll({
+      where: { teacherId: req.user.id },
+      include: [{ model: User, as: 'student', attributes: ['id', 'name', 'username', 'avatar', 'email'] }],
+      order: [['createdAt', 'DESC']],
+    });
+    // Отдаём плоский список студентов
+    const students = links.map(l => l.student).filter(Boolean);
+    res.json({ data: students });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Ошибка получения учеников' });
+  }
+};
+
+module.exports = { getAll, getOne, update, updateProfile, getPublicProfile, getMyStudents };

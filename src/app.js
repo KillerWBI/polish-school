@@ -73,6 +73,7 @@ app.use('/api/v1/individual-lessons', require('./routes/individualLesson.routes'
 app.use('/api/v1/homework',           require('./routes/homework.routes'));
 app.use('/api/v1/attendance',         require('./routes/attendance.routes'));
 app.use('/api/v1/payments',           require('./routes/payment.routes'));
+app.use('/api/v1/lesson-requests',    require('./routes/lessonRequest.routes'));
 
 // Глобальный обработчик ошибок
 app.use((err, req, res, next) => {

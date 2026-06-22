@@ -102,4 +102,40 @@ const sendVerificationEmail = async (to, name, token) => {
   return result.data;
 };
 
-module.exports = { sendVerificationEmail };
+// Уведомление учителю о новой заявке на обучение.
+// Best-effort: вызывающий оборачивает в try/catch, чтобы не блокировать создание заявки.
+const sendLessonRequestEmail = async (to, teacherName, studentName, language) => {
+  const requestsUrl = `${CLIENT_URL}/students`;
+
+  if (!resend) {
+    console.log('\n┌─────────────────────────────────────────────────────────────────');
+    console.log('│ 📧 EMAIL DEV MODE — новая заявка на обучение');
+    console.log(`│ Учителю: ${to} (${teacherName})`);
+    console.log(`│ От студента: ${studentName}, язык: ${language}`);
+    console.log(`│ Смотреть: ${requestsUrl}`);
+    console.log('└─────────────────────────────────────────────────────────────────\n');
+    return { id: 'dev-mode', dev: true };
+  }
+
+  const result = await resend.emails.send({
+    from: FROM,
+    to,
+    subject: 'Новая заявка на обучение — LinguaFlow',
+    html: `
+<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif; max-width:520px; margin:0 auto; padding:24px;">
+  <h2 style="color:#141D35;">Новая заявка на обучение</h2>
+  <p style="color:#475569; font-size:15px; line-height:1.6;">
+    Привет, ${teacherName}!<br/>
+    Студент <b>${studentName}</b> хочет заниматься (язык: <b>${language}</b>).
+  </p>
+  <a href="${requestsUrl}" style="display:inline-block; margin-top:8px; padding:12px 28px; background:#6366f1; color:white; font-weight:600; text-decoration:none; border-radius:10px;">
+    Посмотреть заявку
+  </a>
+</div>`,
+  });
+
+  if (result.error) throw new Error(`Resend: ${result.error.message}`);
+  return result.data;
+};
+
+module.exports = { sendVerificationEmail, sendLessonRequestEmail };

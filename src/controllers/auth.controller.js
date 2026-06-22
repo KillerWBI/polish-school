@@ -56,15 +56,8 @@ const userResponse = (user) => ({
 
 const register = async (req, res) => {
   try {
-    const { name, password } = req.body;
-    const email = req.body.email?.toLowerCase().trim();
-
-    if (!name || !email || !password) {
-      return res.status(400).json({ error: 'Имя, email и пароль обязательны' });
-    }
-    if (password.length < 6) {
-      return res.status(400).json({ error: 'Пароль минимум 6 символов' });
-    }
+    // Формат/required/нормализация email — в schemas/auth.schema.js (validate в роуте)
+    const { name, email, password } = req.body;
 
     const check = await validateEmail(email);
     if (!check.valid) return res.status(400).json({ error: check.reason });
@@ -88,11 +81,7 @@ const register = async (req, res) => {
 
 const login = async (req, res) => {
   try {
-    const { password } = req.body;
-    const email = req.body.email?.toLowerCase().trim();
-    if (!email || !password) {
-      return res.status(400).json({ error: 'Email и пароль обязательны' });
-    }
+    const { email, password } = req.body; // нормализован схемой loginSchema
 
     const user = await User.findOne({ where: { email } });
     // Всегда вызываем bcrypt.compare — иначе «нет юзера» быстрее «неверный пароль»,
@@ -126,15 +115,8 @@ const me = async (req, res) => {
 
 const registerTeacher = async (req, res) => {
   try {
-    const { name, password } = req.body;
-    const email = req.body.email?.toLowerCase().trim();
-
-    if (!name || !email || !password) {
-      return res.status(400).json({ error: 'Имя, email и пароль обязательны' });
-    }
-    if (password.length < 6) {
-      return res.status(400).json({ error: 'Пароль минимум 6 символов' });
-    }
+    // Формат/required/нормализация email — в schemas/auth.schema.js (validate в роуте)
+    const { name, email, password } = req.body;
 
     const check = await validateEmail(email);
     if (!check.valid) return res.status(400).json({ error: check.reason });
@@ -209,10 +191,7 @@ const resendVerification = async (req, res) => {
 
 const changePassword = async (req, res) => {
   try {
-    const { currentPassword, newPassword } = req.body;
-    if (!currentPassword || !newPassword) {
-      return res.status(400).json({ error: 'currentPassword и newPassword обязательны' });
-    }
+    const { currentPassword, newPassword } = req.body; // required/min 6 — в changePasswordSchema
 
     const user = await User.findByPk(req.user.id);
     if (!user) return res.status(404).json({ error: 'Пользователь не найден' });

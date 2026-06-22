@@ -1,4 +1,4 @@
-const { IndividualCourse, User } = require('../models');
+const { IndividualCourse, User, TeacherStudent } = require('../models');
 const { generateIndividualLessons } = require('../utils/lessonGenerator');
 
 const getAll = async (req, res) => {
@@ -22,6 +22,12 @@ const create = async (req, res) => {
     const student = await User.findByPk(studentId);
     if (!student || student.role !== 'student') {
       return res.status(404).json({ error: 'Студент не найден' });
+    }
+
+    // Гейт: индивидуальный курс можно завести только принятому ученику (через заявку).
+    const isMine = await TeacherStudent.findOne({ where: { teacherId: req.user.id, studentId } });
+    if (!isMine) {
+      return res.status(403).json({ error: 'Сначала примите этого студента в ученики (через заявку)' });
     }
 
     const course = await IndividualCourse.create({

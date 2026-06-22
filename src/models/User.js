@@ -49,9 +49,11 @@ const User = sequelize.define('User', {
   avatar:     { type: DataTypes.STRING,      allowNull: true },
   coverImage: { type: DataTypes.STRING,      allowNull: true },
   bio:        { type: DataTypes.TEXT,        allowNull: true, validate: { len: [0, 300] } },
-  socialTelegram: { type: DataTypes.STRING(64),  allowNull: true },
-  socialWhatsApp: { type: DataTypes.STRING(32),  allowNull: true },
-  socialLinkedIn: { type: DataTypes.STRING(128), allowNull: true },
+  socialTelegram:  { type: DataTypes.STRING(64),  allowNull: true },
+  socialWhatsApp:  { type: DataTypes.STRING(32),  allowNull: true },
+  socialLinkedIn:  { type: DataTypes.STRING(128), allowNull: true },
+  socialInstagram: { type: DataTypes.STRING(64),  allowNull: true },
+  phone:           { type: DataTypes.STRING(32),  allowNull: true },
   // [{ code: 'pl', level: 'B2' }] — у учителя level может быть null
   languages: { type: DataTypes.JSONB, allowNull: false, defaultValue: [] },
 });

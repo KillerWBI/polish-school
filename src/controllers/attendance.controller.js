@@ -179,27 +179,47 @@ const create = async (req, res) => {
       return res.status(403).json({ error: 'Доступ запрещён' });
     }
 
-    const rows = records.map(r => ({
-      lessonId:           lessonId           ?? null,
-      individualLessonId: individualLessonId ?? null,
-      studentId:    r.studentId,
-      teacherMarked: r.present ?? false,
-      studentMarked: null,
-      present:      null,              // null = ожидает подтверждения студента
-      status:       'pending_student',
-    }));
-
     const whereClause = lessonId ? { lessonId } : { individualLessonId };
-    const t = await Attendance.sequelize.transaction();
-    try {
-      await Attendance.destroy({ where: whereClause, transaction: t });
-      const created = await Attendance.bulkCreate(rows, { transaction: t });
-      await t.commit();
-      res.status(201).json({ data: created });
-    } catch (err) {
-      await t.rollback();
-      throw err;
-    }
+
+    // Upsert по студенту, НЕ затирая уже полученные подтверждения.
+    // Логика на каждого студента из records:
+    //  - записи ещё нет        → создаём pending_student (ждём подтверждения);
+    //  - отметка учителя та же  → НЕ трогаем (сохраняем confirmed/disputed/pending);
+    //  - отметка изменилась     → сбрасываем в pending_student (студент подтверждает заново).
+    const result = await Attendance.sequelize.transaction(async (t) => {
+      const existing = await Attendance.findAll({ where: whereClause, transaction: t });
+      const byStudent = new Map(existing.map(r => [r.studentId, r]));
+
+      const out = [];
+      for (const r of records) {
+        const newMark = r.present ?? false;
+        const ex = byStudent.get(r.studentId);
+
+        if (!ex) {
+          out.push(await Attendance.create({
+            lessonId:           lessonId           ?? null,
+            individualLessonId: individualLessonId ?? null,
+            studentId:     r.studentId,
+            teacherMarked: newMark,
+            studentMarked: null,
+            present:       null,
+            status:        'pending_student',
+          }, { transaction: t }));
+        } else if (ex.teacherMarked !== newMark) {
+          out.push(await ex.update({
+            teacherMarked: newMark,
+            studentMarked: null,
+            present:       null,
+            status:        'pending_student',
+          }, { transaction: t }));
+        } else {
+          out.push(ex); // отметка не изменилась — статус подтверждения сохраняется
+        }
+      }
+      return out;
+    });
+
+    res.status(201).json({ data: result });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Ошибка создания посещаемости' });

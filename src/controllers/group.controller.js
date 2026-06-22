@@ -1,4 +1,4 @@
-const { Group, GroupStudent, User, Lesson, Homework, HomeworkSubmission, Attendance } = require('../models');
+const { Group, GroupStudent, User, Lesson, Homework, HomeworkSubmission, Attendance, TeacherStudent } = require('../models');
 const { generateGroupLessons } = require('../utils/lessonGenerator');
 
 const getAll = async (req, res) => {
@@ -42,7 +42,7 @@ const create = async (req, res) => {
 const getOne = async (req, res) => {
   try {
     const group = await Group.findByPk(req.params.id, {
-      include: [{ model: User, as: 'students', attributes: ['id', 'name', 'email'] }],
+      include: [{ model: User, as: 'students', attributes: ['id', 'name', 'email', 'username', 'avatar'] }],
     });
     if (!group) return res.status(404).json({ error: 'Группа не найдена' });
 
@@ -132,6 +132,12 @@ const addStudent = async (req, res) => {
     const student = await User.findByPk(studentId);
     if (!student || student.role !== 'student') {
       return res.status(404).json({ error: 'Студент не найден' });
+    }
+
+    // Гейт: в группу можно добавить только принятого ученика (через заявку).
+    const isMine = await TeacherStudent.findOne({ where: { teacherId: req.user.id, studentId } });
+    if (!isMine) {
+      return res.status(403).json({ error: 'Сначала примите этого студента в ученики (через заявку)' });
     }
 
     const exists = await GroupStudent.findOne({ where: { groupId: group.id, studentId } });

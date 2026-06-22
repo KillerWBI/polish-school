@@ -1,4 +1,4 @@
-const { User, Group, GroupStudent, Lesson, IndividualCourse, IndividualLesson, Homework, HomeworkSubmission, Attendance, Payment } = require('../models');
+const { User, Group, GroupStudent, Lesson, IndividualCourse, IndividualLesson, Homework, HomeworkSubmission, Attendance } = require('../models');
 const sequelize = require('../config/database');
 const { QueryTypes, Op } = require('sequelize');
 const { canViewStudentAnalytics } = require('../utils/analyticsAccess');
@@ -76,37 +76,38 @@ const getTeacherAnalytics = async (req, res) => {
 
     // ── 1. Revenue by period: 2 ряда (paid, charged) ─────────────
     // Идея SQL:
-    //  - charged считаем по createdAt платежа (когда учитель начислил)
-    //  - paid — по paidAt (когда деньги пришли)
-    //  - студент учителя = (есть в группе учителя) ∨ (есть в его инд. курсе)
-    //  - DISTINCT в подзапросе чтобы один и тот же студент не дублировался
-    //    если он одновременно в группе и в инд.курсе
+    //  - paid    — реальные деньги: SUM(amount) из PaymentRecords по paidAt.
+    //              teacherId лежит в самой записи → подзапрос студентов не нужен.
+    //  - charged — «начислено/оборот»: сумма цен подтверждённых посещений
+    //              (present=true), бакет по дате урока. Группы + инд.уроки (UNION ALL).
     //
     // FULL OUTER JOIN по bucket — чтобы получить все периоды где есть
     // хотя бы один из показателей. COALESCE() заменит NULL на 0.
     const revenueRows = await sequelize.query(`
-      WITH teacher_students AS (
-        SELECT DISTINCT gs."studentId" FROM "GroupStudents" gs
-          JOIN "Groups" g ON g.id = gs."groupId"
-          WHERE g."teacherId" = :teacherId
-        UNION
-        SELECT DISTINCT ic."studentId" FROM "IndividualCourses" ic
-          WHERE ic."teacherId" = :teacherId
+      WITH paid AS (
+        SELECT TO_CHAR(pr."paidAt", :fmt) AS bucket, SUM(pr.amount)::float AS total
+        FROM "PaymentRecords" pr
+        WHERE pr."teacherId" = :teacherId
+          AND pr."paidAt" >= NOW() - INTERVAL '${cfg.intervalSql}'
+        GROUP BY 1
       ),
       charged AS (
-        SELECT TO_CHAR(p."createdAt", :fmt) AS bucket, SUM(p.amount)::float AS total
-        FROM "Payments" p
-        WHERE p."studentId" IN (SELECT "studentId" FROM teacher_students)
-          AND p."createdAt" >= NOW() - INTERVAL '${cfg.intervalSql}'
-        GROUP BY 1
-      ),
-      paid AS (
-        SELECT TO_CHAR(p."paidAt", :fmt) AS bucket, SUM(p.amount)::float AS total
-        FROM "Payments" p
-        WHERE p."studentId" IN (SELECT "studentId" FROM teacher_students)
-          AND p.paid = true
-          AND p."paidAt" >= NOW() - INTERVAL '${cfg.intervalSql}'
-        GROUP BY 1
+        SELECT bucket, SUM(price)::float AS total
+        FROM (
+          SELECT TO_CHAR(l.date, :fmt) AS bucket, g."pricePerLesson" AS price
+          FROM "Attendances" a
+            JOIN "Lessons" l ON l.id = a."lessonId"
+            JOIN "Groups"  g ON g.id = l."groupId"
+          WHERE g."teacherId" = :teacherId AND a.present = true
+            AND l.date >= (NOW() - INTERVAL '${cfg.intervalSql}')::date
+          UNION ALL
+          SELECT TO_CHAR(il.date, :fmt) AS bucket, il."pricePerLesson" AS price
+          FROM "Attendances" a
+            JOIN "IndividualLessons" il ON il.id = a."individualLessonId"
+          WHERE il."teacherId" = :teacherId AND a.present = true
+            AND il.date >= (NOW() - INTERVAL '${cfg.intervalSql}')::date
+        ) src
+        GROUP BY bucket
       )
       SELECT COALESCE(c.bucket, p.bucket) AS bucket,
              COALESCE(p.total, 0) AS paid,
@@ -118,25 +119,27 @@ const getTeacherAnalytics = async (req, res) => {
     const revenueByPeriod = fillBuckets(revenueRows, period, { paid: 0, charged: 0 });
 
     // ── 2. Активные студенты по месяцам (всегда 6 мес) ─────────────
-    // «Активен в месяце» = есть Payment с month = M (учитель начислил →
-    // значит студент в этом месяце реально занимался).
+    // «Активен в месяце M» = был хотя бы на одном подтверждённом посещении
+    // (present=true) с датой урока в M. Группы + инд.уроки (UNION ALL).
     // COUNT(DISTINCT studentId) защищает от двойного счёта если у студента
-    // несколько payments в одном месяце.
+    // несколько посещений в одном месяце.
     const studentsRows = await sequelize.query(`
-      WITH teacher_students AS (
-        SELECT DISTINCT gs."studentId" FROM "GroupStudents" gs
-          JOIN "Groups" g ON g.id = gs."groupId"
-          WHERE g."teacherId" = :teacherId
-        UNION
-        SELECT DISTINCT ic."studentId" FROM "IndividualCourses" ic
-          WHERE ic."teacherId" = :teacherId
-      )
-      SELECT p.month AS bucket, COUNT(DISTINCT p."studentId")::int AS count
-      FROM "Payments" p
-      WHERE p."studentId" IN (SELECT "studentId" FROM teacher_students)
-        AND p.month >= TO_CHAR(NOW() - INTERVAL '5 months', 'YYYY-MM')
-      GROUP BY p.month
-      ORDER BY p.month;
+      SELECT bucket, COUNT(DISTINCT "studentId")::int AS count
+      FROM (
+        SELECT TO_CHAR(l.date, 'YYYY-MM') AS bucket, a."studentId" AS "studentId"
+        FROM "Attendances" a
+          JOIN "Lessons" l ON l.id = a."lessonId"
+          JOIN "Groups"  g ON g.id = l."groupId"
+        WHERE g."teacherId" = :teacherId AND a.present = true
+        UNION ALL
+        SELECT TO_CHAR(il.date, 'YYYY-MM') AS bucket, a."studentId" AS "studentId"
+        FROM "Attendances" a
+          JOIN "IndividualLessons" il ON il.id = a."individualLessonId"
+        WHERE il."teacherId" = :teacherId AND a.present = true
+      ) src
+      WHERE bucket >= TO_CHAR(NOW() - INTERVAL '5 months', 'YYYY-MM')
+      GROUP BY bucket
+      ORDER BY bucket;
     `, { type: QueryTypes.SELECT, replacements: { teacherId } });
 
     const studentsByMonth = fillBuckets(studentsRows, 'month', { count: 0 });

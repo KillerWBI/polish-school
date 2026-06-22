@@ -1,12 +1,12 @@
 const router = require('express').Router();
-const { calculatePaymentSchema, updatePaymentSchema, paginationQuery } = require('../schemas/payment.schema');
+const { recordPaymentSchema } = require('../schemas/payment.schema');
 const { validate } = require('../middleware/validate');
 const auth = require('../middleware/auth');
 const { isTeacher } = require('../middleware/role');
 const ctrl = require('../controllers/payment.controller');
 
-router.get('/', auth, validate(paginationQuery, 'query'), ctrl.getAll);
-router.post('/calculate', auth, isTeacher, validate(calculatePaymentSchema), ctrl.calculate);
-router.put('/:id', auth, isTeacher, validate(updatePaymentSchema), ctrl.update);
+router.get('/debt', auth, ctrl.getDebt);
+router.get('/debts', auth, isTeacher, ctrl.getDebtsForTeacher);
+router.post('/record', auth, isTeacher, validate(recordPaymentSchema), ctrl.recordPayment);
 
 module.exports = router;
