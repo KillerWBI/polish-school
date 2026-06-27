@@ -1,12 +1,15 @@
 const router = require('express').Router();
 const auth = require('../middleware/auth');
 const { isTeacher } = require('../middleware/role');
+const { validate } = require('../middleware/validate');
+const { searchUser } = require('../schemas/invitation.schema');
 const ctrl = require('../controllers/user.controller');
 const followCtrl = require('../controllers/follow.controller');
 
-// Профиль (специфичные роуты — ДО /:id чтобы Express не съел их как ID)
+// Специфичные роуты — ДО /:id чтобы Express не съел их как ID
 router.put('/me/profile',          auth, ctrl.updateProfile);
 router.get('/me/students',         auth, isTeacher, ctrl.getMyStudents); // «мои ученики» (TeacherStudent)
+router.get('/search',              auth, isTeacher, validate(searchUser, 'query'), ctrl.searchByUsername); // С3: поиск по username для приглашения
 router.get('/@:username/profile',  auth, ctrl.getPublicProfile);
 
 router.get('/', auth, isTeacher, ctrl.getAll);

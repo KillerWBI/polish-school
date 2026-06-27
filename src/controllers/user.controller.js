@@ -1,4 +1,4 @@
-const { User, Follow, TeacherStudent, LessonRequest } = require('../models');
+const { User, Follow, TeacherStudent, LessonRequest, Student } = require('../models');
 
 // Поля, которые возвращаем в публичном профиле (без email, password, токенов)
 const PUBLIC_PROFILE_FIELDS = [
@@ -216,4 +216,27 @@ const getMyStudents = async (req, res) => {
   }
 };
 
-module.exports = { getAll, getOne, update, updateProfile, getPublicProfile, getMyStudents };
+// GET /users/search?username= — учитель ищет студента по точному username (С3, приглашения).
+// Точное совпадение, не подстрока — не даём энумерировать пользователей.
+const searchByUsername = async (req, res) => {
+  try {
+    const username = req.validatedQuery.username.toLowerCase();
+    const user = await User.findOne({
+      where: { username, role: 'student' },
+      attributes: ['id', 'name', 'username', 'avatar'],
+    });
+    if (!user) return res.status(404).json({ error: 'Студент не найден' });
+
+    const alreadyMine = await Student.findOne({
+      where: { teacherId: req.user.id, userId: user.id },
+      attributes: ['id'],
+    });
+
+    res.json({ data: { ...user.toJSON(), alreadyMine: !!alreadyMine } });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Ошибка поиска студента' });
+  }
+};
+
+module.exports = { getAll, getOne, update, updateProfile, getPublicProfile, getMyStudents, searchByUsername };

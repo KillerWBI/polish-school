@@ -14,6 +14,7 @@ const PaymentRecord = require('./PaymentRecord');
 const Post = require('./Post');
 const PostLike = require('./PostLike');
 const Student = require('./Student');
+const Invitation = require('./Invitation');
 
 // Group ↔ User (teacher)
 Group.belongsTo(User, { foreignKey: 'teacherId', as: 'teacher' });
@@ -86,6 +87,11 @@ Student.belongsTo(User, { foreignKey: 'teacherId', as: 'owner' });
 Student.belongsTo(User, { foreignKey: 'userId', as: 'account' });
 User.hasMany(Student, { foreignKey: 'teacherId', as: 'roster' });
 
+// Invitation ↔ User (teacher-отправитель, invitee-получатель) / Group (С3, направление учитель→ученик)
+Invitation.belongsTo(User, { foreignKey: 'teacherId', as: 'teacher' });
+Invitation.belongsTo(User, { foreignKey: 'inviteeUserId', as: 'invitee' });
+Invitation.belongsTo(Group, { foreignKey: 'groupId' });
+
 module.exports = {
   User,
   Group,
@@ -103,4 +109,5 @@ module.exports = {
   Post,
   PostLike,
   Student,
+  Invitation,
 };
