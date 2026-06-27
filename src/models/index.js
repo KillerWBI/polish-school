@@ -11,6 +11,8 @@ const Follow = require('./Follow');
 const LessonRequest = require('./LessonRequest');
 const TeacherStudent = require('./TeacherStudent');
 const PaymentRecord = require('./PaymentRecord');
+const Post = require('./Post');
+const PostLike = require('./PostLike');
 const Student = require('./Student');
 
 // Group ↔ User (teacher)
@@ -69,6 +71,15 @@ TeacherStudent.belongsTo(User, { foreignKey: 'teacherId', as: 'teacher' });
 PaymentRecord.belongsTo(Student, { foreignKey: 'studentId', as: 'student' });
 PaymentRecord.belongsTo(User, { foreignKey: 'teacherId', as: 'teacher' });
 
+// Post ↔ User (автор поста)
+Post.belongsTo(User, { foreignKey: 'authorId', as: 'author' });
+User.hasMany(Post, { foreignKey: 'authorId', as: 'posts' });
+
+// PostLike ↔ Post / User
+PostLike.belongsTo(Post, { foreignKey: 'postId', onDelete: 'CASCADE' });
+Post.hasMany(PostLike, { foreignKey: 'postId', onDelete: 'CASCADE' });
+PostLike.belongsTo(User, { foreignKey: 'userId', onDelete: 'CASCADE' });
+
 // Student ↔ User (owner = учитель-владелец; account = привязанный аккаунт, nullable).
 // studentId в 6 таблицах ссылается на Student.id (C1 фаза 4). Login-данные ученика — через account.
 Student.belongsTo(User, { foreignKey: 'teacherId', as: 'owner' });
@@ -89,5 +100,7 @@ module.exports = {
   LessonRequest,
   TeacherStudent,
   PaymentRecord,
+  Post,
+  PostLike,
   Student,
 };

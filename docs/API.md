@@ -496,6 +496,75 @@ GET /users/@ivan_petrov/profile
 
 ---
 
+## Teachers (каталог) ⏸️ ЗАПАРКОВАНО
+> Соц/маркетплейс, вынесено из teacher-first ([REVISION.md](../../REVISION.md)). Эндпоинт смонтирован, но фронт удалён — переедет в отдельный сервис.
+
+
+| Method | Path | Auth | Role | Описание |
+|--------|------|------|------|----------|
+| GET | `/teachers/catalog` | ✅ | any | Каталог учителей: фильтр по языку, поиск, пагинация |
+
+### GET /teachers/catalog
+```
+Query: ?page=&limit=&language=<code>&q=<строка>   (все опциональны)
+- language — code из LANGUAGES (pl/en/…); матч по JSONB languages @> [{code}]
+- q        — iLike по name ИЛИ username
+- сортировка: по числу учеников DESC, затем createdAt DESC
+```
+```json
+// Response 200
+{
+  "data": [{ "id", "name", "username", "avatar", "bio",
+             "languages": [{ "code", "level?" }],
+             "studentsCount", "followersCount" }],
+  "pagination": { "page", "limit", "total", "pages" }
+}
+// studentsCount/followersCount приходят строками (SQL COUNT) — приводить Number() на фронте
+```
+
+---
+
+## Posts / Feed (лента) ⏸️ ЗАПАРКОВАНО
+> Соц-фича, вынесена из teacher-first ([REVISION.md](../../REVISION.md)). Эндпоинты смонтированы, но фронт удалён — переедет в отдельный сервис.
+
+
+| Method | Path | Auth | Role | Описание |
+|--------|------|------|------|----------|
+| GET | `/feed` | ✅ | any | Лента: ранжированная выдача, офсет-курсор. Инкрементит просмотры |
+| GET | `/posts?authorId=` | ✅ | any | Посты автора (таб профиля), до 20, без инкремента |
+| POST | `/posts` | ✅ | any | Создать пост (текст + media[]) |
+| DELETE | `/posts/:id` | ✅ | author | Удалить свой пост (403 чужому); лайки сносятся каскадом |
+| POST | `/posts/:id/like` | ✅ | any | Лайкнуть (идемпотентно) |
+| DELETE | `/posts/:id/like` | ✅ | any | Снять лайк |
+
+### POST /posts
+```json
+// Body
+{ "text": "строка 1..5000", "media": ["https://...", ...] }  // media опционально, ≤10 URL
+```
+
+### GET /feed
+```
+Query: ?cursor=&limit=   (limit 1..50, default 10)
+- cursor — непрозрачная строка (base64 офсета в ранжированном окне); из nextCursor предыдущего ответа
+- ранжирование: окно последних 200 постов скорится в JS —
+  свежесть (time-decay, τ=48ч) + вовлечённость (лайки/просмотры)
+  + совпадение языков зрителя↔автора + буст подписок/своих учителей
+```
+```json
+// Response 200
+{
+  "data": [{
+    "id", "text", "media": [], "viewsCount", "createdAt",
+    "author": { "id", "name", "username", "avatar", "role" },
+    "likesCount", "likedByMe"
+  }],
+  "nextCursor": "<строка|null>"   // null = постов больше нет
+}
+```
+
+---
+
 ## HTTP коды
 
 | Код | Когда |

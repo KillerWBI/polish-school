@@ -74,7 +74,10 @@ app.use('/api/v1/homework',           require('./routes/homework.routes'));
 app.use('/api/v1/attendance',         require('./routes/attendance.routes'));
 app.use('/api/v1/payments',           require('./routes/payment.routes'));
 app.use('/api/v1/lesson-requests',    require('./routes/lessonRequest.routes'));
+app.use('/api/v1/teachers',           require('./routes/teacher.routes'));
 app.use('/api/v1/students',           require('./routes/student.routes'));
+app.use('/api/v1/posts',              require('./routes/post.routes'));
+app.use('/api/v1/feed',               require('./routes/feed.routes'));
 
 // Глобальный обработчик ошибок
 app.use((err, req, res, next) => {
