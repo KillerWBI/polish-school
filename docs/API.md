@@ -134,6 +134,20 @@ Query: `?period=day|week|month` (default `month`)
 | PUT | `/users/:id` | ✅ | teacher / own | Обновить имя (email не меняется) |
 | **PUT** | **`/users/me/profile`** | ✅ | any | **Обновить свой профиль (Instagram-поля)** |
 | **GET** | **`/users/@:username/profile`** | ✅ | any | **Публичный профиль по username** |
+| **GET** | **`/users/search?username=`** | ✅ | teacher | **C3: найти студента по точному нику для приглашения** |
+
+### GET /users/search?username=
+Учитель ищет студента по **точному** username (не подстрока — чтобы не энумерировать пользователей). Только `role='student'`.
+
+```
+GET /users/search?username=student_c3
+
+// Response 200 — alreadyMine:true если это уже свой реальный ученик (есть Student{userId})
+{ "data": { "id", "name", "username", "avatar", "alreadyMine": false } }
+
+// Response 404
+{ "error": "Студент не найден" }
+```
 
 ### PUT /users/me/profile
 Обновляет поля профиля текущего пользователя. Принимаются только перечисленные поля; остальное (email, password, role) игнорируется.
@@ -201,6 +215,7 @@ GET /users/@ivan_petrov/profile
 | POST | `/groups/:id/placeholder` | ✅ | teacher | Добавить заглушку (ученик без аккаунта) |
 | DELETE | `/groups/:id/students/:studentId` | ✅ | teacher | Убрать ученика из группы (`studentId` = `Student.id`) |
 | POST | `/groups/:id/generate-lessons` | ✅ | teacher | Массовая генерация уроков по расписанию |
+| POST | `/groups/:id/invitations` | ✅ | teacher | C3: пригласить студента в группу (см. секцию Invitations) |
 
 > **C1/C2:** ученик в группе — это запись **`Student`** (см. секцию Students). `GET /groups/:id` отдаёт `students[]` с полями `{ id (=Student.id), name, isPlaceholder, contact, email, username, avatar }` — для заглушки `isPlaceholder:true`, контакты из `contact`; для реального — из привязанного аккаунта.
 
@@ -492,6 +507,57 @@ GET /users/@ivan_petrov/profile
 
 // Response 201
 { "data": { "id", "studentId", "teacherId", "amount", "paidAt" } }
+```
+
+---
+
+## Invitations (приглашения в группу, C3 механика B)
+> Приглашение **учитель→ученик** в группу. Направление противоположно запаркованному `LessonRequest` (там ученик→учитель), поэтому отдельная модель.
+
+| Method | Path | Auth | Role | Описание |
+|--------|------|------|------|----------|
+| POST | `/groups/:id/invitations` | ✅ | teacher | Пригласить студента (по `User.id`) в группу |
+| GET | `/invitations` | ✅ | teacher/student | Список (роль-свитч: учитель — исходящие, студент — входящие); фильтр `?status=` |
+| PATCH | `/invitations/:id` | ✅ | student | Принять (`accepted`) или отклонить (`declined`) приглашение |
+
+### POST /groups/:id/invitations
+```json
+// Body
+{ "inviteeUserId": "<uuid>" }   // приглашаемый студент (User.id)
+
+// Если ученик УЖЕ свой реальный (есть Student{userId} у этого учителя) —
+// добавляется в группу напрямую, без Invitation:
+// Response 201
+{ "data": { "directAdd": true, "message": "Студент уже ваш — добавлен в группу без приглашения" } }
+
+// Иначе создаётся приглашение:
+// Response 201
+{ "data": { "id", "teacherId", "groupId", "inviteeUserId", "status": "pending" } }
+
+// Ошибки: 404 группа не найдена / не студент; 403 чужая группа;
+//         400 уже в группе / приглашение уже отправлено (анти-дубль pending)
+```
+
+### GET /invitations
+```json
+// Учитель видит исходящие (include invitee+Group), студент — входящие (include teacher+Group)
+// ?status=pending|accepted|declined|revoked — опциональный фильтр
+{ "data": [{ "id", "teacherId", "groupId", "inviteeUserId", "status", "teacher"|"invitee", "Group" }] }
+```
+
+### PATCH /invitations/:id
+```json
+// Body (Zod patchInvitation)
+{ "status": "accepted" }   // или "declined"
+
+// Только сам приглашённый (inviteeUserId === me) и только из статуса pending.
+// accept в транзакции: resolveStudent → членство в группе (GroupStudent) →
+//   связь TeacherStudent (гейт оставлен параллельно).
+// Response 200
+{ "data": { "id", "status": "accepted", ... } }
+
+// Ошибки: 404 не найдено; 403 не своё приглашение / не student;
+//         400 уже обработано (status != pending)
 ```
 
 ---

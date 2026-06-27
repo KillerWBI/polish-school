@@ -123,6 +123,22 @@
 
 ---
 
+## 9.6. Invitations — приглашения в группу ✅ бэк (C3 механика B)
+
+**Файлы:** `Invitation.js`, `invitation.controller.js`, `invitation.routes.js`, `invitation.schema.js` (+ `searchByUsername` в `user.controller.js`)
+
+Приглашение **учитель→ученик** в группу `{ teacherId, groupId, inviteeUserId, status }`, `status` ENUM `pending/accepted/declined/revoked`. Частичный unique `(teacherId,groupId,inviteeUserId) WHERE status='pending'` — анти-дубль активных. Отдельная модель (не `LessonRequest` — там обратное направление).
+
+- `GET /users/search?username=` — учитель ищет студента точным ником (`role='student'`), флаг `alreadyMine`.
+- `create` (`POST /groups/:id/invitations`) — если приглашаемый уже свой `Student{userId}` → прямое `GroupStudent.create` без инвайта; иначе `Invitation{pending}` с анти-дублем.
+- `getAll` (`GET /invitations`) — роль-свитч (учитель: исходящие; студент: входящие), фильтр `?status=`.
+- `patch` (`PATCH /invitations/:id`) — только `isStudent` + сам приглашённый; `accept` в транзакции: `resolveStudent`→`GroupStudent.findOrCreate`→`TeacherStudent.findOrCreate`; `decline` меняет статус.
+- Гейт `TeacherStudent` **оставлен параллельно** (не заменён на инвайты).
+
+Фронт (Ф5–Ф6) — в работе. Подробно — [REVISION.md](../../REVISION.md) §5.3.
+
+---
+
 ## 10. Инфраструктура ✅
 
 ### Запуск
