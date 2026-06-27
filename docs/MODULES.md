@@ -107,6 +107,22 @@
 
 ---
 
+## 9.5. Students — заглушки + перенос ✅ (C1/C2)
+
+**Файлы:** `Student.js`, `student.controller.js`, `student.routes.js`, `student.schema.js`, `utils/students.js`, `utils/studentFkRegistry.js`
+
+Ученик — единая запись **`Student`** `{ teacherId, userId (nullable), name, contact }` (C1): `userId=null` → заглушка, заполнен → реальный. Все 6 FK `studentId` (`GroupStudent`/`IndividualCourse`/`IndividualLesson`/`Attendance`/`PaymentRecord`/`HomeworkSubmission`) ссылаются на `Student.id`.
+
+- `utils/students.js` — `getStudentIdsForUser`, `resolveStudent` (User.id→Student), `getTeacherStudentIds`, `createPlaceholder`.
+- `utils/studentFkRegistry.js` — реестр 6 FK (для merge/удаления).
+- `merge` (`POST /students/:id/merge`) — перенос заглушки на реального: перепривязка 6 FK в транзакции + разрешение дублей (keep-target) + удаление заглушки.
+- `remove` (`DELETE /students/:id`) — полное удаление заглушки (явный снос детей по реестру), защита `userId IS NULL`.
+- Создание заглушки — `POST /groups/:id/placeholder` + ветка `placeholder` в `individualCourse/individualLesson.create`.
+
+Подробно — [REVISION.md](../../REVISION.md) §5.1–5.2.
+
+---
+
 ## 10. Инфраструктура ✅
 
 ### Запуск

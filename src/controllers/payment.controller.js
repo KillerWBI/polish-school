@@ -1,4 +1,5 @@
-const { PaymentRecord, Attendance, Lesson, IndividualLesson, Group, GroupStudent, IndividualCourse, User, TeacherStudent } = require('../models');
+const { PaymentRecord, Attendance, Lesson, IndividualLesson, Group, GroupStudent, IndividualCourse, User, Student } = require('../models');
+const { getStudentIdsForUser } = require('../utils/students');
 const { Op } = require('sequelize');
 
 // id студентов учителя: через его группы (GroupStudent) + индивидуальные курсы.
@@ -109,8 +110,9 @@ const recordPayment = async (req, res) => {
     const teacherId = req.user.id;
     const { studentId, amount } = req.body;
 
-    const link = await TeacherStudent.findOne({ where: { teacherId, studentId } });
-    if (!link) return res.status(403).json({ error: 'Этот студент не является вашим учеником' });
+    // studentId — это Student.id; проверяем, что эта запись принадлежит учителю
+    const student = await Student.findOne({ where: { id: studentId, teacherId } });
+    if (!student) return res.status(403).json({ error: 'Этот ученик не в вашем ростере' });
 
     const record = await PaymentRecord.create({ studentId, teacherId, amount });
     res.status(201).json({ data: record });
@@ -123,19 +125,16 @@ const recordPayment = async (req, res) => {
 // GET /payments/debt — студент видит долг по каждому учителю
 const getDebt = async (req, res) => {
   try {
-    const studentId = req.user.id;
+    // У пользователя может быть несколько Student-записей (по одной на учителя) — агрегируем по всем
+    const myStudentIds = await getStudentIdsForUser(req.user.id);
 
-    // Начислено по каждому учителю (из посещений)
-    const charged = await computeChargedByTeacher(studentId);
-
-    // Оплачено по каждому учителю (из PaymentRecord)
-    const records = await PaymentRecord.findAll({
-      where: { studentId },
-      attributes: ['teacherId', 'amount'],
-    });
-    const paid = new Map();
-    for (const r of records) {
-      paid.set(r.teacherId, (paid.get(r.teacherId) ?? 0) + parseFloat(r.amount));
+    const charged = new Map(); // teacherId → начислено
+    const paid = new Map();    // teacherId → оплачено
+    for (const sid of myStudentIds) {
+      const c = await computeChargedByTeacher(sid);
+      for (const [tid, amt] of c) charged.set(tid, (charged.get(tid) ?? 0) + amt);
+      const records = await PaymentRecord.findAll({ where: { studentId: sid }, attributes: ['teacherId', 'amount'] });
+      for (const r of records) paid.set(r.teacherId, (paid.get(r.teacherId) ?? 0) + parseFloat(r.amount));
     }
 
     // Объединяем все teacherId из обоих источников
@@ -173,17 +172,20 @@ const getDebtsForTeacher = async (req, res) => {
     if (studentIds.length === 0) {
       return res.json({ data: [] });
     }
-    const students = await User.findAll ({ where: { id: studentIds }, attributes: ['id', 'name', 'email'] });
+    const students = await Student.findAll({
+      where: { id: studentIds },
+      attributes: ['id', 'name'],
+      include: [{ model: User, as: 'account', attributes: ['email'] }],
+    });
     const data = [];
     for (const student of students) {
       const charged = await computeChargedByTeacher(student.id);
-      const paidRecords = await PaymentRecord.findAll({ where: { studentId: student.id , teacherId: req.user.id}, attributes: ['amount'] });
-      //получаем в таком виде: [{amount: 100}, {amount: 200}]
-      const paid = paidRecords.reduce( (sum, record) => sum + parseFloat(record.amount) || 0, 0 );
+      const paidRecords = await PaymentRecord.findAll({ where: { studentId: student.id, teacherId: req.user.id }, attributes: ['amount'] });
+      const paid = paidRecords.reduce((sum, record) => sum + (parseFloat(record.amount) || 0), 0);
       data.push({
-        student,
+        student: { id: student.id, name: student.name, email: student.account?.email ?? null },
         charged: charged.get(req.user.id) ?? 0,
-        paid: paid,
+        paid,
         balance: (charged.get(req.user.id) ?? 0) - paid,
       });
     }

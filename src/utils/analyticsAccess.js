@@ -1,44 +1,23 @@
-const { Group, User, IndividualCourse } = require('../models');
+const { Student } = require('../models');
 
 /**
  * Может ли requester видеть аналитику студента?
+ *  - студент видит свою аналитику всегда (requesterId === studentId)
+ *  - учитель видит, если у него есть Student-запись, привязанная к этому аккаунту
+ *    (teacherId=requesterId, userId=studentId) — это и значит «мой ученик»
  *
- * Правила:
- *  - студент видит свою аналитику всегда
- *  - учитель видит, если студент в его группе ИЛИ в его инд. курсе
- *  - иначе — нет
- *
- * @param {string} requesterId — id текущего пользователя (req.user.id)
- * @param {string} studentId   — id студента, чью аналитику просят
+ * @param {string} requesterId — User.id текущего пользователя
+ * @param {string} studentId   — User.id студента, чью аналитику просят
  * @returns {Promise<boolean>}
  */
 const canViewStudentAnalytics = async (requesterId, studentId) => {
-  // Свои данные всегда можно
   if (requesterId === studentId) return true;
 
-  // Связь через группу: ищем группу учителя, в которой состоит этот студент.
-  // Идём через belongsToMany (Group→User as 'students'), это уже объявлено в models/index.js.
-  // attributes: [] и through: { attributes: [] } — не тянем лишних полей, нам нужен только факт связи.
-  const group = await Group.findOne({
-    where: { teacherId: requesterId },
-    attributes: ['id'],
-    include: [{
-      model: User,
-      as: 'students',
-      where: { id: studentId },
-      attributes: [],
-      through: { attributes: [] },
-      required: true, // INNER JOIN — иначе вернёт группы без студента
-    }],
-  });
-  if (group) return true;
-
-  // Связь через индивидуальный курс
-  const courseLink = await IndividualCourse.findOne({
-    where: { teacherId: requesterId, studentId },
+  const link = await Student.findOne({
+    where: { teacherId: requesterId, userId: studentId },
     attributes: ['id'],
   });
-  return !!courseLink;
+  return !!link;
 };
 
 module.exports = { canViewStudentAnalytics };

@@ -27,4 +27,10 @@ const addStudent = z.object({
   studentId: z.uuid('studentId должен быть валидным UUID'),
 });
 
-module.exports = { createGroup, updateGroup, addStudent };
+// POST /groups/:id/placeholder — добавить заглушку (ученик без аккаунта)
+const addPlaceholder = z.object({
+  name:    z.string().trim().min(1, 'Имя обязательно'),
+  contact: z.string().trim().optional(),
+});
+
+module.exports = { createGroup, updateGroup, addStudent, addPlaceholder };

@@ -1,9 +1,10 @@
 const {
   Group, GroupStudent, Lesson, IndividualLesson,
-  Homework, HomeworkSubmission, Attendance, PaymentRecord, User,
+  Homework, HomeworkSubmission, Attendance, PaymentRecord, User, Student,
 } = require('../models');
 const { Op } = require('sequelize');
 const { getTeacherDebtTotal, getStudentDebtTotal } = require('./payment.controller');
+const { getStudentIdsForUser } = require('../utils/students');
 
 /* ════════════════════════════════════════════════════════════════════════
    УЧИТЕЛЬ
@@ -51,7 +52,7 @@ const buildTeacherDashboard = async (teacherId) => {
         HomeworkSubmission.findAll({
           where: { homeworkId: { [Op.in]: hwIds }, status: 'pending' },
           include: [
-            { model: User,     as: 'student', attributes: ['id', 'name'] },
+            { model: Student,  as: 'student', attributes: ['id', 'name'] },
             { model: Homework, attributes: ['id', 'description'] },
           ],
           order: [['createdAt', 'DESC']],
@@ -99,7 +100,7 @@ const buildTeacherDashboard = async (teacherId) => {
       : Promise.resolve([]),
     IndividualLesson.findAll({
       where: { teacherId, date: { [Op.gte]: today } },
-      include: [{ model: User, as: 'student', attributes: ['id', 'name'] }],
+      include: [{ model: Student, as: 'student', attributes: ['id', 'name'] }],
       order: [['date', 'ASC'], ['time', 'ASC']],
       limit: 5,
       attributes: ['id', 'date', 'time'],
@@ -135,7 +136,10 @@ const buildTeacherDashboard = async (teacherId) => {
 /* ════════════════════════════════════════════════════════════════════════
    СТУДЕНТ
    ════════════════════════════════════════════════════════════════════════ */
-const buildStudentDashboard = async (studentId) => {
+const buildStudentDashboard = async (userId) => {
+  // Пользователь = несколько Student-записей (по одной на учителя). studentId — массив их id;
+  // поэтому все where { studentId } ниже становятся IN-фильтрами по этим записям.
+  const studentId = await getStudentIdsForUser(userId);
   const today        = new Date().toISOString().slice(0, 10);
   const currentMonth = today.slice(0, 7);
   const [year, mon]  = currentMonth.split('-').map(Number);
@@ -217,8 +221,9 @@ const buildStudentDashboard = async (studentId) => {
     if (total > 0) attendancePercent = Math.round((present / total) * 100);
   }
 
-  // 4. Мой долг — из PaymentRecord (начислено − оплачено по всем учителям)
-  const myDebt = await getStudentDebtTotal(studentId);
+  // 4. Мой долг — сумма по всем моим Student-записям (по каждой — её учитель, кламп ≥0 внутри)
+  let myDebt = 0;
+  for (const sid of studentId) myDebt += await getStudentDebtTotal(sid);
 
   // 5. Ближайшие уроки
   const [upcomingGroup, upcomingInd] = await Promise.all([
@@ -310,7 +315,7 @@ const buildTeacherActivity = async (teacherId) => {
       submissions = await HomeworkSubmission.findAll({
         where: { homeworkId: { [Op.in]: hwIds } },
         include: [
-          { model: User,     as: 'student', attributes: ['id', 'name'] },
+          { model: Student,  as: 'student', attributes: ['id', 'name'] },
           { model: Homework, attributes: ['id', 'description'] },
         ],
         order: [['createdAt', 'DESC']],
@@ -323,7 +328,7 @@ const buildTeacherActivity = async (teacherId) => {
   // События оплат — из PaymentRecord (teacherId лежит в самой записи, по paidAt).
   const payments = await PaymentRecord.findAll({
     where: { teacherId },
-    include: [{ model: User, as: 'student', attributes: ['id', 'name'] }],
+    include: [{ model: Student, as: 'student', attributes: ['id', 'name'] }],
     order: [['paidAt', 'DESC']],
     limit: 10,
     attributes: ['id', 'amount', 'paidAt'],
@@ -347,7 +352,8 @@ const buildTeacherActivity = async (teacherId) => {
   ].sort((a, b) => new Date(b.at) - new Date(a.at)).slice(0, 15);
 };
 
-const buildStudentActivity = async (studentId) => {
+const buildStudentActivity = async (userId) => {
+  const studentId = await getStudentIdsForUser(userId); // массив Student.id пользователя → where IN
   // Мои сдачи + оценки
   const submissions = await HomeworkSubmission.findAll({
     where: { studentId },

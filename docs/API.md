@@ -197,9 +197,12 @@ GET /users/@ivan_petrov/profile
 | GET | `/groups/:id` | ✅ | teacher / member | Группа + список студентов |
 | PUT | `/groups/:id` | ✅ | teacher | Редактировать группу |
 | DELETE | `/groups/:id` | ✅ | teacher | Удалить группу |
-| POST | `/groups/:id/students` | ✅ | teacher | Добавить студента |
-| DELETE | `/groups/:id/students/:studentId` | ✅ | teacher | Убрать студента |
+| POST | `/groups/:id/students` | ✅ | teacher | Добавить реального ученика (вход — `User.id`, гейт `TeacherStudent`) |
+| POST | `/groups/:id/placeholder` | ✅ | teacher | Добавить заглушку (ученик без аккаунта) |
+| DELETE | `/groups/:id/students/:studentId` | ✅ | teacher | Убрать ученика из группы (`studentId` = `Student.id`) |
 | POST | `/groups/:id/generate-lessons` | ✅ | teacher | Массовая генерация уроков по расписанию |
+
+> **C1/C2:** ученик в группе — это запись **`Student`** (см. секцию Students). `GET /groups/:id` отдаёт `students[]` с полями `{ id (=Student.id), name, isPlaceholder, contact, email, username, avatar }` — для заглушки `isPlaceholder:true`, контакты из `contact`; для реального — из привязанного аккаунта.
 
 ### POST /groups
 ```json
@@ -218,8 +221,15 @@ GET /users/@ivan_petrov/profile
 
 ### POST /groups/:id/students
 ```json
-// Body
-{ "studentId": "uuid-студента" }
+// Body — studentId это User.id аккаунта (резолвится в Student-запись учителя)
+{ "studentId": "uuid-аккаунта" }
+```
+
+### POST /groups/:id/placeholder
+```json
+// Body — заглушка (ученик без аккаунта), без гейта
+{ "name": "Вася", "contact": "@vasya" }   // contact опционален
+// Response 201: { "data": { "id", "name", "contact", "isPlaceholder": true } }
 ```
 
 ### POST /groups/:id/generate-lessons
@@ -234,6 +244,30 @@ GET /users/@ivan_petrov/profile
 // Response 200
 { "data": { "created": 9, "lessons": [{ "id", "groupId", "date", "time" }] } }
 ```
+
+---
+
+## Students (ученики-записи: заглушки + перенос)
+
+**Модель (C1):** ученик — единая запись **`Student`** `{ id, teacherId, userId (nullable), name, contact }`, принадлежит учителю (per-teacher). `userId=null` → **заглушка** (только для учителя); `userId` заполнен → **реальный** (привязан к аккаунту). Все «студенческие» FK (`GroupStudent`/`IndividualCourse`/`IndividualLesson`/`Attendance`/`PaymentRecord`/`HomeworkSubmission`.`studentId`) ссылаются на `Student.id`.
+
+Заглушки создаются через `POST /groups/:id/placeholder` (или ветка `placeholder` в `POST /individual-courses` и `/individual-lessons`). Посещаемость заглушки авто-`confirmed` (подтверждать некому). Долг/посещаемость считаются как у реального.
+
+| Method | Path | Auth | Role | Описание |
+|--------|------|------|------|----------|
+| POST | `/students/:id/merge` | ✅ | teacher | Перенести заглушку на реального ученика (история переезжает, заглушка удаляется) |
+| DELETE | `/students/:id` | ✅ | teacher | Полностью удалить заглушку из ростера (с историей); реального — нельзя (403) |
+
+### POST /students/:id/merge
+`:id` — заглушка (своя, `userId=null`). Все её записи в 6 таблицах перепривязываются на `targetStudentId` (реальный, свой), конфликты unique разрешаются «оставить target, отбросить дубль заглушки», затем заглушка удаляется. Всё в транзакции.
+```json
+// Body
+{ "targetStudentId": "uuid-реального-Student" }
+// Response 200: { "data": { "merged": true, "moved": 5, "skipped": 1 } }
+```
+
+### DELETE /students/:id
+Удаляет заглушку и всю её историю (явный снос детей по реестру FK + сама запись, в транзакции). Защита: только `userId IS NULL` — реального ученика так удалить нельзя (403).
 
 ---
 

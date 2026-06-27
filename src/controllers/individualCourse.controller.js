@@ -1,11 +1,12 @@
 const { IndividualCourse, User, TeacherStudent } = require('../models');
 const { generateIndividualLessons } = require('../utils/lessonGenerator');
+const { getStudentIdsForUser, resolveStudent, createPlaceholder } = require('../utils/students');
 
 const getAll = async (req, res) => {
   try {
     const where = req.user.role === 'teacher'
       ? { teacherId: req.user.id }
-      : { studentId: req.user.id };
+      : { studentId: await getStudentIdsForUser(req.user.id) };
     const courses = await IndividualCourse.findAll({ where });
     res.json({ data: courses });
   } catch (err) {
@@ -16,23 +17,30 @@ const getAll = async (req, res) => {
 
 const create = async (req, res) => {
   try {
-    const { studentId, name, schedule, lessonLink, pricePerLesson } = req.body;
-    if (!studentId) return res.status(400).json({ error: 'studentId обязателен' });
+    const { studentId, placeholder, name, schedule, lessonLink, pricePerLesson } = req.body;
 
-    const student = await User.findByPk(studentId);
-    if (!student || student.role !== 'student') {
-      return res.status(404).json({ error: 'Студент не найден' });
-    }
-
-    // Гейт: индивидуальный курс можно завести только принятому ученику (через заявку).
-    const isMine = await TeacherStudent.findOne({ where: { teacherId: req.user.id, studentId } });
-    if (!isMine) {
-      return res.status(403).json({ error: 'Сначала примите этого студента в ученики (через заявку)' });
+    // Ученик курса — заглушка (placeholder) ИЛИ реальный аккаунт (studentId)
+    let student;
+    if (placeholder && placeholder.name) {
+      // Заглушка — без гейта TeacherStudent
+      student = await createPlaceholder(req.user.id, placeholder.name, placeholder.contact);
+    } else {
+      if (!studentId) return res.status(400).json({ error: 'Нужен studentId или placeholder' });
+      const user = await User.findByPk(studentId);
+      if (!user || user.role !== 'student') {
+        return res.status(404).json({ error: 'Студент не найден' });
+      }
+      // Гейт: курс реальному ученику — только принятому. TeacherStudent — по User.id.
+      const isMine = await TeacherStudent.findOne({ where: { teacherId: req.user.id, studentId } });
+      if (!isMine) {
+        return res.status(403).json({ error: 'Сначала примите этого студента в ученики (через заявку)' });
+      }
+      student = await resolveStudent(req.user.id, studentId, user.name);
     }
 
     const course = await IndividualCourse.create({
       teacherId: req.user.id,
-      studentId,
+      studentId: student.id,
       name: name || null,
       schedule: schedule || [],
       lessonLink: lessonLink || null,
@@ -53,8 +61,9 @@ const getOne = async (req, res) => {
     if (req.user.role === 'teacher' && course.teacherId !== req.user.id) {
       return res.status(403).json({ error: 'Доступ запрещён' });
     }
-    if (req.user.role === 'student' && course.studentId !== req.user.id) {
-      return res.status(403).json({ error: 'Доступ запрещён' });
+    if (req.user.role === 'student') {
+      const myStudentIds = await getStudentIdsForUser(req.user.id);
+      if (!myStudentIds.includes(course.studentId)) return res.status(403).json({ error: 'Доступ запрещён' });
     }
 
     res.json({ data: course });

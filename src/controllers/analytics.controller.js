@@ -2,6 +2,7 @@ const { User, Group, GroupStudent, Lesson, IndividualCourse, IndividualLesson, H
 const sequelize = require('../config/database');
 const { QueryTypes, Op } = require('sequelize');
 const { canViewStudentAnalytics } = require('../utils/analyticsAccess');
+const { getStudentIdsForUser } = require('../utils/students');
 
 /* ═══════════════════════════════════════════════════════════════
    PERIOD HELPERS
@@ -205,18 +206,29 @@ const getTeacherAnalytics = async (req, res) => {
 */
 const getStudentAnalytics = async (req, res) => {
   try {
-    const studentId = req.params.id;
+    const userId = req.params.id;
 
-    // Проверка доступа
-    const allowed = await canViewStudentAnalytics(req.user.id, studentId);
+    // Проверка доступа (по User.id)
+    const allowed = await canViewStudentAnalytics(req.user.id, userId);
     if (!allowed) return res.status(403).json({ error: 'Доступ запрещён' });
 
     // Студент существует и это student?
     const student = await User.findOne({
-      where: { id: studentId, role: 'student' },
+      where: { id: userId, role: 'student' },
       attributes: ['id'],
     });
     if (!student) return res.status(404).json({ error: 'Студент не найден' });
+
+    // Аналитика по всем Student-записям пользователя (по учителям). Нет записей — пустые графики.
+    const studentIds = await getStudentIdsForUser(userId);
+    if (studentIds.length === 0) {
+      return res.json({ data: {
+        attendanceByMonth: fillBuckets([], 'month', { percent: 0 }),
+        homeworkStats: { submitted: 0, total: 0, percent: 0 },
+        grades: [],
+        totals: { attendance: 0, gradesAvg: 0, lessonsAttended: 0 },
+      } });
+    }
 
     // ── 1. attendanceByMonth — % посещаемости по месяцам ─────────
     // Берём месяц из даты урока (Lesson.date / IndividualLesson.date),
@@ -226,18 +238,18 @@ const getStudentAnalytics = async (req, res) => {
       WITH att AS (
         SELECT TO_CHAR(l.date, 'YYYY-MM') AS bucket, a.present::int AS p
           FROM "Attendances" a JOIN "Lessons" l ON l.id = a."lessonId"
-          WHERE a."studentId" = :studentId
+          WHERE a."studentId" IN (:studentIds)
         UNION ALL
         SELECT TO_CHAR(il.date, 'YYYY-MM') AS bucket, a.present::int AS p
           FROM "Attendances" a JOIN "IndividualLessons" il ON il.id = a."individualLessonId"
-          WHERE a."studentId" = :studentId
+          WHERE a."studentId" IN (:studentIds)
       )
       SELECT bucket, ROUND(AVG(p) * 100)::int AS percent
       FROM att
       WHERE bucket >= TO_CHAR(NOW() - INTERVAL '5 months', 'YYYY-MM')
       GROUP BY bucket
       ORDER BY bucket;
-    `, { type: QueryTypes.SELECT, replacements: { studentId } });
+    `, { type: QueryTypes.SELECT, replacements: { studentIds } });
 
     const attendanceByMonth = fillBuckets(attendanceRows, 'month', { percent: 0 });
 
@@ -251,20 +263,20 @@ const getStudentAnalytics = async (req, res) => {
         SELECT h.id FROM "Homeworks" h
           JOIN "Lessons" l         ON l.id = h."lessonId"
           JOIN "GroupStudents" gs  ON gs."groupId" = l."groupId"
-          WHERE gs."studentId" = :studentId
+          WHERE gs."studentId" IN (:studentIds)
             AND h.deadline IS NOT NULL AND h.deadline < NOW()
         UNION
         SELECT h.id FROM "Homeworks" h
           JOIN "IndividualLessons" il ON il.id = h."individualLessonId"
-          WHERE il."studentId" = :studentId
+          WHERE il."studentId" IN (:studentIds)
             AND h.deadline IS NOT NULL AND h.deadline < NOW()
       )
       SELECT
         (SELECT COUNT(*) FROM due_hw)::int AS total,
         (SELECT COUNT(*) FROM "HomeworkSubmissions" hs
-          WHERE hs."studentId" = :studentId
+          WHERE hs."studentId" IN (:studentIds)
             AND hs."homeworkId" IN (SELECT id FROM due_hw))::int AS submitted;
-    `, { type: QueryTypes.SELECT, replacements: { studentId } });
+    `, { type: QueryTypes.SELECT, replacements: { studentIds } });
 
     const homeworkStats = {
       submitted: hwRow?.submitted ?? 0,
@@ -280,20 +292,20 @@ const getStudentAnalytics = async (req, res) => {
              SUBSTRING(h.description FROM 1 FOR 60) AS homework
       FROM "HomeworkSubmissions" hs
       JOIN "Homeworks" h ON h.id = hs."homeworkId"
-      WHERE hs."studentId" = :studentId AND hs.grade IS NOT NULL
+      WHERE hs."studentId" IN (:studentIds) AND hs.grade IS NOT NULL
       ORDER BY hs."updatedAt" DESC
       LIMIT 10;
-    `, { type: QueryTypes.SELECT, replacements: { studentId } });
+    `, { type: QueryTypes.SELECT, replacements: { studentIds } });
 
     // ── 4. totals — общий % посещаемости + средняя оценка + урок-counts
     const [totalsRow] = await sequelize.query(`
       SELECT
         (SELECT COALESCE(ROUND(AVG(present::int) * 100)::int, 0)
-           FROM "Attendances" WHERE "studentId" = :studentId) AS attendance,
+           FROM "Attendances" WHERE "studentId" IN (:studentIds)) AS attendance,
         (SELECT COALESCE(ROUND(AVG(grade)::numeric, 1), 0)
-           FROM "HomeworkSubmissions" WHERE "studentId" = :studentId AND grade IS NOT NULL) AS "gradesAvg",
-        (SELECT COUNT(*)::int FROM "Attendances" WHERE "studentId" = :studentId AND present = true) AS "lessonsAttended";
-    `, { type: QueryTypes.SELECT, replacements: { studentId } });
+           FROM "HomeworkSubmissions" WHERE "studentId" IN (:studentIds) AND grade IS NOT NULL) AS "gradesAvg",
+        (SELECT COUNT(*)::int FROM "Attendances" WHERE "studentId" IN (:studentIds) AND present = true) AS "lessonsAttended";
+    `, { type: QueryTypes.SELECT, replacements: { studentIds } });
 
     res.json({
       data: {

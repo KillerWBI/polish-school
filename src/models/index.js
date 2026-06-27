@@ -11,26 +11,27 @@ const Follow = require('./Follow');
 const LessonRequest = require('./LessonRequest');
 const TeacherStudent = require('./TeacherStudent');
 const PaymentRecord = require('./PaymentRecord');
+const Student = require('./Student');
 
 // Group ↔ User (teacher)
 Group.belongsTo(User, { foreignKey: 'teacherId', as: 'teacher' });
 User.hasMany(Group, { foreignKey: 'teacherId', as: 'teacherGroups' });
 
-// Group ↔ User (students) через GroupStudent
-Group.belongsToMany(User, { through: GroupStudent, foreignKey: 'groupId', as: 'students', onDelete: 'CASCADE' });
-User.belongsToMany(Group, { through: GroupStudent, foreignKey: 'studentId', as: 'groups' });
+// Group ↔ Student через GroupStudent (studentId = Student.id после C1)
+Group.belongsToMany(Student, { through: GroupStudent, foreignKey: 'groupId', as: 'students', onDelete: 'CASCADE' });
+Student.belongsToMany(Group, { through: GroupStudent, foreignKey: 'studentId', as: 'groups' });
 
 // Lesson ↔ Group
 Lesson.belongsTo(Group, { foreignKey: 'groupId', onDelete: 'CASCADE' });
 Group.hasMany(Lesson, { foreignKey: 'groupId', onDelete: 'CASCADE' });
 
-// IndividualLesson ↔ User
+// IndividualLesson ↔ User (teacher) / Student (student)
 IndividualLesson.belongsTo(User, { foreignKey: 'teacherId', as: 'teacher' });
-IndividualLesson.belongsTo(User, { foreignKey: 'studentId', as: 'student' });
+IndividualLesson.belongsTo(Student, { foreignKey: 'studentId', as: 'student' });
 
-// IndividualCourse ↔ User (teacher + student)
+// IndividualCourse ↔ User (teacher) / Student (student)
 IndividualCourse.belongsTo(User, { foreignKey: 'teacherId', as: 'teacher' });
-IndividualCourse.belongsTo(User, { foreignKey: 'studentId', as: 'student' });
+IndividualCourse.belongsTo(Student, { foreignKey: 'studentId', as: 'student' });
 
 // IndividualCourse ↔ IndividualLesson (1 → many, nullable)
 IndividualCourse.hasMany(IndividualLesson, { foreignKey: 'individualCourseId' });
@@ -42,15 +43,15 @@ Homework.belongsTo(IndividualLesson, { foreignKey: 'individualLessonId' });
 Lesson.hasMany(Homework, { foreignKey: 'lessonId' });
 IndividualLesson.hasMany(Homework, { foreignKey: 'individualLessonId' });
 
-// HomeworkSubmission ↔ Homework, User
+// HomeworkSubmission ↔ Homework, Student
 HomeworkSubmission.belongsTo(Homework, { foreignKey: 'homeworkId' });
-HomeworkSubmission.belongsTo(User, { foreignKey: 'studentId', as: 'student' });
+HomeworkSubmission.belongsTo(Student, { foreignKey: 'studentId', as: 'student' });
 Homework.hasMany(HomeworkSubmission, { foreignKey: 'homeworkId' });
 
-// Attendance ↔ Lesson / IndividualLesson, User
+// Attendance ↔ Lesson / IndividualLesson, Student
 Attendance.belongsTo(Lesson, { foreignKey: 'lessonId' });
 Attendance.belongsTo(IndividualLesson, { foreignKey: 'individualLessonId' });
-Attendance.belongsTo(User, { foreignKey: 'studentId', as: 'student' });
+Attendance.belongsTo(Student, { foreignKey: 'studentId', as: 'student' });
 
 // Follow ↔ User (подписка: follower → following)
 Follow.belongsTo(User, { foreignKey: 'followerId',  as: 'follower' });
@@ -64,9 +65,15 @@ LessonRequest.belongsTo(User, { foreignKey: 'teacherId', as: 'teacher' });
 TeacherStudent.belongsTo(User, { foreignKey: 'studentId', as: 'student' });
 TeacherStudent.belongsTo(User, { foreignKey: 'teacherId', as: 'teacher' });
 
-// PaymentRecord ↔ User (платёж: от ученика — учителю)
-PaymentRecord.belongsTo(User, { foreignKey: 'studentId', as: 'student' });
+// PaymentRecord ↔ Student (плательщик) / User (учитель-получатель)
+PaymentRecord.belongsTo(Student, { foreignKey: 'studentId', as: 'student' });
 PaymentRecord.belongsTo(User, { foreignKey: 'teacherId', as: 'teacher' });
+
+// Student ↔ User (owner = учитель-владелец; account = привязанный аккаунт, nullable).
+// studentId в 6 таблицах ссылается на Student.id (C1 фаза 4). Login-данные ученика — через account.
+Student.belongsTo(User, { foreignKey: 'teacherId', as: 'owner' });
+Student.belongsTo(User, { foreignKey: 'userId', as: 'account' });
+User.hasMany(Student, { foreignKey: 'teacherId', as: 'roster' });
 
 module.exports = {
   User,
@@ -82,4 +89,5 @@ module.exports = {
   LessonRequest,
   TeacherStudent,
   PaymentRecord,
+  Student,
 };

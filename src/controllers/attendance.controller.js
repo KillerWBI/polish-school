@@ -1,6 +1,7 @@
-const { Attendance, Lesson, Group, IndividualLesson, User } = require('../models');
+const { Attendance, Lesson, Group, IndividualLesson, Student, User } = require('../models');
 const { Op } = require('sequelize');
 const { isHwOwner } = require('../utils/ownership');
+const { getStudentIdsForUser } = require('../utils/students');
 
 // ── Авто-подтверждение: если студент не ответил за 3 дня — засчитываем как учитель ──
 const autoConfirmExpired = async () => {
@@ -37,7 +38,10 @@ const getAll = async (req, res) => {
     // Сначала авто-подтверждаем просроченные pending-записи (ленивая обработка)
     await autoConfirmExpired();
 
-    const where = req.user.role === 'student' ? { studentId: req.user.id } : {};
+    const where = {};
+    if (req.user.role === 'student') {
+      where.studentId = await getStudentIdsForUser(req.user.id); // все Student-записи пользователя
+    }
 
     if (req.query.lessonId)           where.lessonId           = req.query.lessonId;
     if (req.query.individualLessonId) where.individualLessonId = req.query.individualLessonId;
@@ -59,7 +63,7 @@ const getAll = async (req, res) => {
       model: IndividualLesson,
       attributes: ['id', 'date', 'time', 'topic'],
       required: false,
-      include: [{ model: User, as: 'student', attributes: ['id', 'name'] }],
+      include: [{ model: Student, as: 'student', attributes: ['id', 'name'] }],
     };
 
     if (req.query.month || req.query.from || req.query.to) {
@@ -115,8 +119,9 @@ const getPending = async (req, res) => {
     let records;
 
     if (req.user.role === 'student') {
+      const myStudentIds = await getStudentIdsForUser(req.user.id);
       records = await Attendance.findAll({
-        where: { studentId: req.user.id, status: { [Op.in]: ['pending_student', 'disputed'] } },
+        where: { studentId: myStudentIds, status: { [Op.in]: ['pending_student', 'disputed'] } },
         include: [
           { model: Lesson,         attributes: ['id','date','time','topic'], required: false,
             include: [{ model: Group, attributes: ['id','name'] }] },
@@ -151,7 +156,8 @@ const getPending = async (req, res) => {
           { model: Lesson,          attributes: ['id','date','time','topic'], required: false,
             include: [{ model: Group, attributes: ['id','name'] }] },
           { model: IndividualLesson, attributes: ['id','date','time','topic'], required: false },
-          { model: User, as: 'student', attributes: ['id','name','email'] },
+          { model: Student, as: 'student', attributes: ['id','name'],
+            include: [{ model: User, as: 'account', attributes: ['email'] }] },
         ],
         order: [['createdAt', 'DESC']],
       });
@@ -186,6 +192,12 @@ const create = async (req, res) => {
     //  - записи ещё нет        → создаём pending_student (ждём подтверждения);
     //  - отметка учителя та же  → НЕ трогаем (сохраняем confirmed/disputed/pending);
     //  - отметка изменилась     → сбрасываем в pending_student (студент подтверждает заново).
+    // Заглушки (Student.userId IS NULL) — подтверждать некому, отметка учителя финальна.
+    const placeholderRows = await Student.findAll({
+      where: { id: records.map(r => r.studentId), userId: null }, attributes: ['id'],
+    });
+    const placeholderIds = new Set(placeholderRows.map(p => p.id));
+
     const result = await Attendance.sequelize.transaction(async (t) => {
       const existing = await Attendance.findAll({ where: whereClause, transaction: t });
       const byStudent = new Map(existing.map(r => [r.studentId, r]));
@@ -193,25 +205,21 @@ const create = async (req, res) => {
       const out = [];
       for (const r of records) {
         const newMark = r.present ?? false;
+        // Заглушка → сразу confirmed/present; реальный → pending_student (ждёт подтверждения)
+        const fields = placeholderIds.has(r.studentId)
+          ? { teacherMarked: newMark, studentMarked: newMark, present: newMark, status: 'confirmed' }
+          : { teacherMarked: newMark, studentMarked: null,    present: null,    status: 'pending_student' };
         const ex = byStudent.get(r.studentId);
 
         if (!ex) {
           out.push(await Attendance.create({
             lessonId:           lessonId           ?? null,
             individualLessonId: individualLessonId ?? null,
-            studentId:     r.studentId,
-            teacherMarked: newMark,
-            studentMarked: null,
-            present:       null,
-            status:        'pending_student',
+            studentId:          r.studentId,
+            ...fields,
           }, { transaction: t }));
         } else if (ex.teacherMarked !== newMark) {
-          out.push(await ex.update({
-            teacherMarked: newMark,
-            studentMarked: null,
-            present:       null,
-            status:        'pending_student',
-          }, { transaction: t }));
+          out.push(await ex.update(fields, { transaction: t }));
         } else {
           out.push(ex); // отметка не изменилась — статус подтверждения сохраняется
         }
@@ -231,7 +239,9 @@ const confirmStudent = async (req, res) => {
   try {
     const record = await Attendance.findByPk(req.params.id);
     if (!record) return res.status(404).json({ error: 'Запись не найдена' });
-    if (record.studentId !== req.user.id) return res.status(403).json({ error: 'Доступ запрещён' });
+    // record.studentId — Student.id; проверяем, что он среди Student-записей пользователя
+    const myStudentIds = await getStudentIdsForUser(req.user.id);
+    if (!myStudentIds.includes(record.studentId)) return res.status(403).json({ error: 'Доступ запрещён' });
 
     const { present } = req.body;
     if (typeof present !== 'boolean') {

@@ -1,6 +1,7 @@
-const { Homework, HomeworkSubmission, GroupStudent, Lesson, Group, IndividualLesson, User } = require('../models');
+const { Homework, HomeworkSubmission, GroupStudent, Lesson, Group, IndividualLesson, User, Student } = require('../models');
 const { Op } = require('sequelize');
 const { isHwOwner } = require('../utils/ownership');
+const { getStudentIdsForUser } = require('../utils/students');
 
 
 
@@ -10,11 +11,16 @@ const { isHwOwner } = require('../utils/ownership');
 // Возвращает { lessonIds, indLessonIds }. Используется в getAll / getOne / submit.
 const collectAccessibleLessonIds = async (user) => {
   let groupIds;
+  let myStudentIds = [];
   if (user.role === 'teacher') {
     const groups = await Group.findAll({ where: { teacherId: user.id }, attributes: ['id'] });
     groupIds = groups.map(g => g.id);
   } else {
-    const memberships = await GroupStudent.findAll({ where: { studentId: user.id }, attributes: ['groupId'] });
+    // студент: его Student-записи → членства в группах
+    myStudentIds = await getStudentIdsForUser(user.id);
+    const memberships = myStudentIds.length
+      ? await GroupStudent.findAll({ where: { studentId: myStudentIds }, attributes: ['groupId'] })
+      : [];
     groupIds = memberships.map(m => m.groupId);
   }
 
@@ -23,7 +29,7 @@ const collectAccessibleLessonIds = async (user) => {
       ? Lesson.findAll({ where: { groupId: { [Op.in]: groupIds } }, attributes: ['id'] })
       : Promise.resolve([]),
     IndividualLesson.findAll({
-      where: user.role === 'teacher' ? { teacherId: user.id } : { studentId: user.id },
+      where: user.role === 'teacher' ? { teacherId: user.id } : { studentId: myStudentIds },
       attributes: ['id'],
     }),
   ]);
@@ -34,22 +40,23 @@ const collectAccessibleLessonIds = async (user) => {
   };
 };
 
-// true если студент имеет доступ к конкретному ДЗ
-// (состоит в группе урока ИЛИ это его индивидуальный урок).
-const studentCanAccessHw = async (hw, studentId) => {
+// Возвращает Student.id, под которым пользователь имеет доступ к ДЗ (состоит в группе урока
+// ИЛИ это его инд. урок), или null. studentIds — Student-записи пользователя (по учителям).
+const resolveAccessStudentId = async (hw, studentIds) => {
+  if (!studentIds.length) return null;
   if (hw.lessonId) {
     const lesson = await Lesson.findByPk(hw.lessonId, { attributes: ['groupId'] });
-    if (!lesson) return false;
+    if (!lesson) return null;
     const member = await GroupStudent.findOne({
-      where: { groupId: lesson.groupId, studentId }, attributes: ['id'],
+      where: { groupId: lesson.groupId, studentId: studentIds }, attributes: ['studentId'],
     });
-    return !!member;
+    return member ? member.studentId : null;
   }
   if (hw.individualLessonId) {
     const il = await IndividualLesson.findByPk(hw.individualLessonId, { attributes: ['studentId'] });
-    return !!(il && il.studentId === studentId);
+    return (il && studentIds.includes(il.studentId)) ? il.studentId : null;
   }
-  return false;
+  return null;
 };
 
 // S1: и учитель, и студент видят ТОЛЬКО ДЗ своих уроков.
@@ -71,8 +78,9 @@ const getAll = async (req, res) => {
     }
 
     // Студенту подмешиваем его сдачу (для статуса на фронте); учителю — нет.
+    const myStudentIds = req.user.role === 'student' ? await getStudentIdsForUser(req.user.id) : [];
     const include = req.user.role === 'student'
-      ? [{ model: HomeworkSubmission, required: false, where: { studentId: req.user.id } }]
+      ? [{ model: HomeworkSubmission, required: false, where: { studentId: myStudentIds } }]
       : [];
 
     const { count, rows } = await Homework.findAndCountAll({
@@ -125,7 +133,7 @@ const getOne = async (req, res) => {
 
     const allowed = req.user.role === 'teacher'
       ? await isHwOwner(hw, req.user.id)
-      : await studentCanAccessHw(hw, req.user.id);
+      : !!(await resolveAccessStudentId(hw, await getStudentIdsForUser(req.user.id)));
     if (!allowed) return res.status(403).json({ error: 'Доступ запрещён' });
 
     res.json({ data: hw });
@@ -170,19 +178,22 @@ const submit = async (req, res) => {
     const hw = await Homework.findByPk(req.params.id);
     if (!hw) return res.status(404).json({ error: 'Задание не найдено' });
 
-    // S2: студент может сдать только ДЗ своих групп / инд. уроков
-    if (!await studentCanAccessHw(hw, req.user.id)) {
+    // S2: студент может сдать только ДЗ своих групп / инд. уроков.
+    // accessStudentId — Student.id (по нужному учителю), под которым пишем сдачу.
+    const myStudentIds = await getStudentIdsForUser(req.user.id);
+    const accessStudentId = await resolveAccessStudentId(hw, myStudentIds);
+    if (!accessStudentId) {
       return res.status(403).json({ error: 'Это задание не относится к вашим занятиям' });
     }
 
     const existing = await HomeworkSubmission.findOne({
-      where: { homeworkId: hw.id, studentId: req.user.id },
+      where: { homeworkId: hw.id, studentId: accessStudentId },
     });
     if (existing) return res.status(400).json({ error: 'Вы уже сдали это задание' });
 
     const sub = await HomeworkSubmission.create({
       homeworkId: hw.id,
-      studentId:  req.user.id,
+      studentId:  accessStudentId,
       fileUrl:    fileUrl || null,
       comment:    comment || null,
     });
@@ -201,7 +212,8 @@ const getSubmissions = async (req, res) => {
 
     const submissions = await HomeworkSubmission.findAll({
       where: { homeworkId: req.params.id },
-      include: [{ model: User, as: 'student', attributes: ['id', 'name', 'email'] }],
+      include: [{ model: Student, as: 'student', attributes: ['id', 'name'],
+        include: [{ model: User, as: 'account', attributes: ['email'] }] }],
     });
     res.json({ data: submissions });
   } catch (err) {

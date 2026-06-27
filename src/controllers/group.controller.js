@@ -1,5 +1,6 @@
-const { Group, GroupStudent, User, Lesson, Homework, HomeworkSubmission, Attendance, TeacherStudent } = require('../models');
+const { Group, GroupStudent, User, Student, Lesson, Homework, HomeworkSubmission, Attendance, TeacherStudent } = require('../models');
 const { generateGroupLessons } = require('../utils/lessonGenerator');
+const { getStudentIdsForUser, resolveStudent, createPlaceholder } = require('../utils/students');
 
 const getAll = async (req, res) => {
   try {
@@ -7,11 +8,13 @@ const getAll = async (req, res) => {
     if (req.user.role === 'teacher') {
       groups = await Group.findAll({ where: { teacherId: req.user.id } });
     } else {
-      // студент видит только свои группы
-      const user = await User.findByPk(req.user.id, {
-        include: [{ model: Group, as: 'groups' }],
-      });
-      groups = user.groups;
+      // студент видит свои группы: через его Student-записи → членства
+      const myStudentIds = await getStudentIdsForUser(req.user.id);
+      const memberships = myStudentIds.length
+        ? await GroupStudent.findAll({ where: { studentId: myStudentIds }, attributes: ['groupId'] })
+        : [];
+      const groupIds = [...new Set(memberships.map(m => m.groupId))];
+      groups = groupIds.length ? await Group.findAll({ where: { id: groupIds } }) : [];
     }
     res.json({ data: groups });
   } catch (err) {
@@ -42,7 +45,10 @@ const create = async (req, res) => {
 const getOne = async (req, res) => {
   try {
     const group = await Group.findByPk(req.params.id, {
-      include: [{ model: User, as: 'students', attributes: ['id', 'name', 'email', 'username', 'avatar'] }],
+      include: [{
+        model: Student, as: 'students', attributes: ['id', 'name', 'userId', 'contact'],
+        include: [{ model: User, as: 'account', attributes: ['email', 'username', 'avatar'] }],
+      }],
     });
     if (!group) return res.status(404).json({ error: 'Группа не найдена' });
 
@@ -51,15 +57,29 @@ const getOne = async (req, res) => {
       return res.status(403).json({ error: 'Доступ запрещён' });
     }
 
-    // студент может смотреть только свои группы
+    // студент может смотреть только свои группы (по своим Student-записям)
     if (req.user.role === 'student') {
-      const isMember = await GroupStudent.findOne({
-        where: { groupId: group.id, studentId: req.user.id },
-      });
+      const myStudentIds = await getStudentIdsForUser(req.user.id);
+      const isMember = myStudentIds.length
+        ? await GroupStudent.findOne({ where: { groupId: group.id, studentId: myStudentIds } })
+        : null;
       if (!isMember) return res.status(403).json({ error: 'Доступ запрещён' });
     }
 
-    res.json({ data: group });
+    // Уплощаем ученика: id (=Student.id), name из Student, контакты — из привязанного аккаунта.
+    // isPlaceholder = нет аккаунта (заглушка); contact — ручной контакт для заглушки.
+    const data = group.toJSON();
+    data.students = (data.students || []).map(s => ({
+      id: s.id,
+      name: s.name,
+      isPlaceholder: s.userId === null,
+      contact: s.contact ?? null,
+      email: s.account?.email ?? null,
+      username: s.account?.username ?? null,
+      avatar: s.account?.avatar ?? null,
+    }));
+
+    res.json({ data });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Ошибка получения группы' });
@@ -129,25 +149,47 @@ const addStudent = async (req, res) => {
     if (!group) return res.status(404).json({ error: 'Группа не найдена' });
     if (group.teacherId !== req.user.id) return res.status(403).json({ error: 'Доступ запрещён' });
 
-    const student = await User.findByPk(studentId);
-    if (!student || student.role !== 'student') {
+    // studentId от пикера — это User.id (аккаунт)
+    const user = await User.findByPk(studentId);
+    if (!user || user.role !== 'student') {
       return res.status(404).json({ error: 'Студент не найден' });
     }
 
-    // Гейт: в группу можно добавить только принятого ученика (через заявку).
+    // Гейт: в группу можно добавить только принятого ученика (через заявку). TeacherStudent — по User.id.
     const isMine = await TeacherStudent.findOne({ where: { teacherId: req.user.id, studentId } });
     if (!isMine) {
       return res.status(403).json({ error: 'Сначала примите этого студента в ученики (через заявку)' });
     }
 
-    const exists = await GroupStudent.findOne({ where: { groupId: group.id, studentId } });
+    // Резолвим аккаунт в Student-запись этого учителя (find-or-create) и пишем её id в членство
+    const student = await resolveStudent(req.user.id, studentId, user.name);
+    const exists = await GroupStudent.findOne({ where: { groupId: group.id, studentId: student.id } });
     if (exists) return res.status(400).json({ error: 'Студент уже в группе' });
 
-    await GroupStudent.create({ groupId: group.id, studentId });
+    await GroupStudent.create({ groupId: group.id, studentId: student.id });
     res.status(201).json({ data: { message: 'Студент добавлен' } });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Ошибка добавления студента' });
+  }
+};
+
+// POST /groups/:id/placeholder — добавить заглушку (ученик без аккаунта).
+// БЕЗ гейта TeacherStudent: заглушка уже принадлежит учителю (teacherId).
+const addPlaceholder = async (req, res) => {
+  try {
+    const { name, contact } = req.body;
+
+    const group = await Group.findByPk(req.params.id);
+    if (!group) return res.status(404).json({ error: 'Группа не найдена' });
+    if (group.teacherId !== req.user.id) return res.status(403).json({ error: 'Доступ запрещён' });
+
+    const student = await createPlaceholder(req.user.id, name, contact);
+    await GroupStudent.create({ groupId: group.id, studentId: student.id });
+    res.status(201).json({ data: { id: student.id, name: student.name, contact: student.contact, isPlaceholder: true } });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Ошибка добавления заглушки' });
   }
 };
 
@@ -184,4 +226,4 @@ const generateLessons = async (req, res) => {
   }
 };
 
-module.exports = { getAll, create, getOne, update, remove, addStudent, removeStudent, generateLessons };
+module.exports = { getAll, create, getOne, update, remove, addStudent, addPlaceholder, removeStudent, generateLessons };

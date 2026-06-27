@@ -1,5 +1,6 @@
 const { Lesson, Group, GroupStudent, Homework } = require('../models');
 const { Op } = require('sequelize');
+const { getStudentIdsForUser } = require('../utils/students');
 
 const groupInclude = { model: Group, attributes: ['id', 'name', 'lessonLink', 'teacherId'] };
 
@@ -26,10 +27,10 @@ const getAll = async (req, res) => {
       const groups = await Group.findAll({ where: { teacherId: req.user.id }, attributes: ['id'] });
       groupIds = groups.map(g => g.id);
     } else {
-      const memberships = await GroupStudent.findAll({
-        where: { studentId: req.user.id },
-        attributes: ['groupId'],
-      });
+      const myStudentIds = await getStudentIdsForUser(req.user.id);
+      const memberships = myStudentIds.length
+        ? await GroupStudent.findAll({ where: { studentId: myStudentIds }, attributes: ['groupId'] })
+        : [];
       groupIds = memberships.map(m => m.groupId);
     }
 
@@ -96,9 +97,10 @@ const getOne = async (req, res) => {
         return res.status(403).json({ error: 'Доступ запрещён' });
       }
     } else {
-      const isMember = await GroupStudent.findOne({
-        where: { groupId: lesson.groupId, studentId: req.user.id },
-      });
+      const myStudentIds = await getStudentIdsForUser(req.user.id);
+      const isMember = myStudentIds.length
+        ? await GroupStudent.findOne({ where: { groupId: lesson.groupId, studentId: myStudentIds } })
+        : null;
       if (!isMember) return res.status(403).json({ error: 'Доступ запрещён' });
     }
 
