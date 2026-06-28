@@ -31,6 +31,12 @@ const HomeworkSubmission = sequelize.define('HomeworkSubmission', {
     type: DataTypes.ENUM('pending', 'graded'),
     defaultValue: 'pending',
   },
+}, {
+  // Один студент сдаёт одно ДЗ один раз. Индекс в модели → sync({alter}) его создаёт
+  // и не сносит (раньше констрейнт из миграции 0521 затирался sync'ом в dev).
+  indexes: [
+    { unique: true, fields: ['homeworkId', 'studentId'], name: 'homework_submissions_hw_student_uidx' },
+  ],
 });
 
 module.exports = HomeworkSubmission;

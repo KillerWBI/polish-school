@@ -24,6 +24,11 @@ const Group = sequelize.define('Group', {
     type: DataTypes.STRING,
     allowNull: true,
   },
+  // ссылка на внешний чат группы (Telegram/WhatsApp)
+  chatLink: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
   pricePerLesson: {
     type: DataTypes.DECIMAL(10, 2),
     allowNull: false,

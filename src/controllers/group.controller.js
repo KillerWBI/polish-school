@@ -26,13 +26,14 @@ const getAll = async (req, res) => {
 const create = async (req, res) => {
   try {
     // name/schedule/pricePerLesson проверены схемой createGroup.
-    const { name, schedule, lessonLink, pricePerLesson } = req.body;
+    const { name, schedule, lessonLink, chatLink, pricePerLesson } = req.body;
 
     const group = await Group.create({
       name,
       teacherId: req.user.id,
       schedule: schedule || [],
       lessonLink: lessonLink || null,
+      chatLink: chatLink || null,
       pricePerLesson: pricePerLesson || 0,
     });
     res.status(201).json({ data: group });
@@ -92,8 +93,8 @@ const update = async (req, res) => {
     if (!group) return res.status(404).json({ error: 'Группа не найдена' });
     if (group.teacherId !== req.user.id) return res.status(403).json({ error: 'Доступ запрещён' });
 
-    const { name, schedule, lessonLink, pricePerLesson } = req.body;
-    await group.update({ name, schedule, lessonLink, pricePerLesson });
+    const { name, schedule, lessonLink, chatLink, pricePerLesson } = req.body;
+    await group.update({ name, schedule, lessonLink, chatLink, pricePerLesson });
     res.json({ data: group });
   } catch (err) {
     console.error(err);

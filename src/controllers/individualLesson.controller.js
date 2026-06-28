@@ -71,6 +71,10 @@ const create = async (req, res) => {
     });
     res.status(201).json({ data: lesson });
   } catch (err) {
+    // unique (individualCourseId,date,time) — урок серии на это время уже есть
+    if (err.name === 'SequelizeUniqueConstraintError') {
+      return res.status(409).json({ error: 'Урок на эту дату и время уже существует' });
+    }
     console.error(err);
     res.status(500).json({ error: 'Ошибка создания индивидуального урока' });
   }

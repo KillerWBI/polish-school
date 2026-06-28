@@ -11,6 +11,7 @@ const createGroup = z.object({
   name:           z.string().trim().min(1, 'Название обязательно'),
   schedule:       z.array(scheduleSlot).optional(),
   lessonLink:     z.string().trim().optional(),
+  chatLink:       z.string().trim().optional(),
   pricePerLesson: z.coerce.number().min(0, 'Цена не может быть отрицательной').optional(),
 });
 
@@ -19,6 +20,7 @@ const updateGroup = z.object({
   name:           z.string().trim().min(1, 'Название не может быть пустым').optional(),
   schedule:       z.array(scheduleSlot).optional(),
   lessonLink:     z.string().trim().optional(),
+  chatLink:       z.string().trim().optional(),
   pricePerLesson: z.coerce.number().min(0, 'Цена не может быть отрицательной').optional(),
 });
 

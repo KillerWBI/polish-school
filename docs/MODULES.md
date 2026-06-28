@@ -31,8 +31,10 @@
 
 - CRUD с ownership check на `update/delete` ✅
 - Студент получает только свои группы
+- Поля: `name`, `schedule`, `lessonLink`, **`chatLink`** (ссылка на внешний чат группы, TG/WA — 2026-06-28), `pricePerLesson`
 - `POST /groups/:id/students` + `DELETE /groups/:id/students/:studentId` — ⚠️ нет ownership check
 - `POST /groups/:id/generate-lessons { from, to }` — идемпотентно (findOrCreate по `groupId+date+time`)
+- **Unique:** урок уникален по `(groupId,date,time)` (индекс в модели + миграция; дубль → 409). Аналогично IndividualLessons `(individualCourseId,date,time)` и HomeworkSubmissions `(homeworkId,studentId)` — 2026-06-28
 
 **Файлы:** `group.controller.js`, `group.routes.js`, `Group.js`, `GroupStudent.js`, `lessonGenerator.js`
 

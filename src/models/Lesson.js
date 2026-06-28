@@ -37,6 +37,12 @@ const Lesson = sequelize.define('Lesson', {
     type: DataTypes.JSONB,
     defaultValue: [],
   },
+}, {
+  // Один урок на (группа, дата, время) — нет дублей-уроков.
+  // Индекс в модели (а не только в миграции), чтобы sync({alter}) в dev его создавал и не сносил.
+  indexes: [
+    { unique: true, fields: ['groupId', 'date', 'time'], name: 'lessons_group_date_time_uidx' },
+  ],
 });
 
 module.exports = Lesson;

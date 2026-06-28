@@ -2,7 +2,7 @@ const { Lesson, Group, GroupStudent, Homework } = require('../models');
 const { Op } = require('sequelize');
 const { getStudentIdsForUser } = require('../utils/students');
 
-const groupInclude = { model: Group, attributes: ['id', 'name', 'lessonLink', 'teacherId'] };
+const groupInclude = { model: Group, attributes: ['id', 'name', 'lessonLink', 'chatLink', 'teacherId'] };
 
 // Строит WHERE по query-параметрам: groupId, from, to, date
 const buildDateWhere = (query) => {
@@ -80,6 +80,10 @@ const create = async (req, res) => {
     const lesson = await Lesson.create({ groupId, date, time, topic, description, lessonLink, materials });
     res.status(201).json({ data: lesson });
   } catch (err) {
+    // unique (groupId,date,time) — урок на это время уже есть
+    if (err.name === 'SequelizeUniqueConstraintError') {
+      return res.status(409).json({ error: 'Урок на эту дату и время уже существует' });
+    }
     console.error(err);
     res.status(500).json({ error: 'Ошибка создания урока' });
   }

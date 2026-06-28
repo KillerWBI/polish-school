@@ -226,13 +226,17 @@ GET /users/@ivan_petrov/profile
   "name": "Группа A1",
   "schedule": [{ "day": 1, "time": "18:00" }, { "day": 3, "time": "18:00" }],
   "lessonLink": "https://zoom.us/j/xxx",
+  "chatLink": "https://t.me/mygroup",
   "pricePerLesson": 300
 }
 // day: 0=Вс, 1=Пн, 2=Вт, 3=Ср, 4=Чт, 5=Пт, 6=Сб
+// chatLink — ссылка на внешний чат группы (TG/WA), опционально; PUT /groups/:id принимает то же
 
 // Response 201
-{ "data": { "id", "name", "schedule", "lessonLink", "pricePerLesson", "teacherId" } }
+{ "data": { "id", "name", "schedule", "lessonLink", "chatLink", "pricePerLesson", "teacherId" } }
 ```
+
+> **Уникальность урока:** `POST /lessons` и `POST /individual-lessons` отклоняют дубль по `(group/course, date, time)` с **409** «Урок на эту дату и время уже существует» (unique-индекс на уровне БД).
 
 ### POST /groups/:id/students
 ```json

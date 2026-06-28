@@ -50,6 +50,12 @@ const IndividualLesson = sequelize.define('IndividualLesson', {
     type: DataTypes.JSONB,
     defaultValue: [],
   },
+}, {
+  // Один урок серии на (курс, дата, время). Разовые уроки (individualCourseId IS NULL)
+  // не ограничиваются — PG считает NULL != NULL. Индекс в модели → устойчив к sync({alter}).
+  indexes: [
+    { unique: true, fields: ['individualCourseId', 'date', 'time'], name: 'individual_lessons_course_date_time_uidx' },
+  ],
 });
 
 module.exports = IndividualLesson;
