@@ -6,7 +6,7 @@
 
 | Роль | Значение | Создаётся |
 |------|----------|-----------|
-| `teacher` | Учитель — полный доступ | `POST /auth/register-teacher` (через Postman, требует `teacherSecret`) |
+| `teacher` | Учитель — полный доступ | `POST /auth/register-teacher` (открытая регистрация, без `teacherSecret`) |
 | `student` | Студент | `POST /auth/register` (открытая регистрация) |
 
 ---
@@ -14,7 +14,7 @@
 ## Что может teacher
 
 ### Auth / Profile
-- Регистрация (`register-teacher` + `teacherSecret`), логин
+- Регистрация (`register-teacher`, открытая, без секрета), логин
 - Просмотр своего профиля (`GET /auth/me`)
 - Редактирование имени (`PUT /users/:id`, только `name`)
 - Смена пароля (`PUT /auth/password`)

@@ -1,25 +1,10 @@
-const { PaymentRecord, Attendance, Lesson, IndividualLesson, Group, GroupStudent, IndividualCourse, User, Student } = require('../models');
-const { getStudentIdsForUser } = require('../utils/students');
-const { Op } = require('sequelize');
+const { PaymentRecord, Attendance, Lesson, IndividualLesson, Group, User, Student } = require('../models');
+const { getStudentIdsForUser, getTeacherStudentIds } = require('../utils/students');
 
-// id студентов учителя: через его группы (GroupStudent) + индивидуальные курсы.
-// Set убирает дубли, если студент и в группе, и на инд. курсе.
-const getTeacherStudentIds = async (teacherId) => {
-  const groups = await Group.findAll({ where: { teacherId }, attributes: ['id'] });
-  const groupIds = groups.map(g => g.id);
-
-  const [groupStudents, indCourses] = await Promise.all([
-    groupIds.length
-      ? GroupStudent.findAll({ where: { groupId: { [Op.in]: groupIds } }, attributes: ['studentId'] })
-      : Promise.resolve([]),
-    IndividualCourse.findAll({ where: { teacherId }, attributes: ['studentId'] }),
-  ]);
-
-  return [...new Set([
-    ...groupStudents.map(r => r.studentId),
-    ...indCourses.map(r => r.studentId),
-  ])];
-};
+// getTeacherStudentIds — все Student.id учителя из таблицы Student (utils/students.js).
+// Раньше тут был локальный вариант через GroupStudent+IndividualCourse — он терял учеников
+// с одними лишь разовыми инд.уроками (individualCourseId=null) и учеников, убранных из групп
+// (но с историей долга). Таблица Student покрывает всех учеников ростера.
 
 const getStudentDebtTotal = async (studentId) => {
   // Начислено по каждому учителю (из посещений)

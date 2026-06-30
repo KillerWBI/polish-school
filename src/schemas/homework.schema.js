@@ -21,10 +21,11 @@ const updateHomework = z.object({
   deadline:    z.coerce.date().optional(),
 });
 
-// POST /homework/:id/submit — сдача. Можно сдать пустую (только коммент).
+// POST /homework/:id/submit — сдача. Можно сдать пустую (только коммент или вовсе пусто).
+// nullable: фронт шлёт fileUrl:null когда файла нет — это валидное «нет файла».
 const submitHomework = z.object({
-  fileUrl: z.string().trim().optional(),
-  comment: z.string().trim().optional(),
+  fileUrl: z.string().trim().nullable().optional(),
+  comment: z.string().trim().nullable().optional(),
 });
 
 // PUT /homework/:id/submissions/:subId — оценка 0..100 (целое) или null для сброса в pending.
