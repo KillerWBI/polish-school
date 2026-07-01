@@ -14,11 +14,15 @@ Response format:
 
 | Method | Path | Auth | Role | Описание |
 |--------|------|------|------|----------|
-| POST | `/auth/register` | — | — | Регистрация студента |
-| POST | `/auth/register-teacher` | — | — | Регистрация учителя (требует `teacherSecret`) |
-| POST | `/auth/login` | — | — | Вход, возвращает JWT |
+| POST | `/auth/register` | — | — | Регистрация студента (access в теле + refresh-cookie) |
+| POST | `/auth/register-teacher` | — | — | **Открытая** регистрация учителя (без `teacherSecret`) |
+| POST | `/auth/login` | — | — | Вход: access-JWT в теле + refresh в httpOnly-cookie |
+| POST | `/auth/refresh` | cookie | — | Refresh-cookie → **новый access** (скользящее окно) |
+| POST | `/auth/logout` | — | — | Гасит refresh-cookie |
 | GET | `/auth/me` | ✅ | any | Текущий пользователь |
 | PUT | `/auth/password` | ✅ | any | Смена пароля |
+
+> **Токены (2026-07-01):** access-JWT **7д** — в теле ответа (`data.token`), фронт хранит в localStorage и шлёт `Authorization: Bearer`. Refresh-JWT **30д** — в **httpOnly-cookie** (`path=/api/v1/auth`), JS его не видит. Access истёк → фронт зовёт `/auth/refresh` (с `withCredentials`) → новый access → повторяет запрос. `/auth/logout` чистит cookie.
 
 ### POST /auth/register
 ```json
@@ -30,15 +34,14 @@ Response format:
 ```
 
 ### POST /auth/register-teacher
-Создаёт учителя. Требует `teacherSecret` совпадающий с `TEACHER_SECRET` в `.env`.  
-Использовать через Postman — не публичный эндпоинт.
+**Открытая** регистрация учителя (после разворота — без `teacherSecret`).
 
 ```json
 // Body
-{ "name": "Учитель", "email": "teacher@mail.com", "password": "пароль", "teacherSecret": "..." }
+{ "name": "Учитель", "email": "teacher@mail.com", "password": "пароль" }
 
-// Response 201
-{ "data": { "token": "...", "user": { "id", "name", "email", "role": "teacher" } } }
+// Response 201 — + ставит refresh-cookie
+{ "data": { "token": "<access>", "user": { "id", "name", "username", "email", "role": "teacher" } } }
 ```
 
 ### POST /auth/login
@@ -46,8 +49,16 @@ Response format:
 // Body
 { "email": "anna@mail.com", "password": "123456" }
 
+// Response 200 — access в теле, refresh в httpOnly-cookie
+{ "data": { "token": "<access>", "user": { "id", "name", "username", "email", "role" } } }
+```
+
+### POST /auth/refresh
+```
+// Refresh-токен берётся из httpOnly-cookie (тело пустое, нужен withCredentials).
 // Response 200
-{ "data": { "token": "...", "user": { "id", "name", "email", "role" } } }
+{ "data": { "token": "<новый access>" } }
+// Response 401 — нет/невалиден refresh → фронт разлогинивает
 ```
 
 ### PUT /auth/password
@@ -133,20 +144,18 @@ Query: `?period=day|week|month` (default `month`)
 | GET | `/users/:id` | ✅ | teacher / own | Профиль пользователя |
 | PUT | `/users/:id` | ✅ | teacher / own | Обновить имя (email не меняется) |
 | **PUT** | **`/users/me/profile`** | ✅ | any | **Обновить свой профиль (Instagram-поля)** |
-| **GET** | **`/users/@:username/profile`** | ✅ | any | **Публичный профиль по username** |
-| **GET** | **`/users/search?username=`** | ✅ | teacher | **C3: найти студента по точному нику для приглашения** |
+| **GET** | **`/users/search?username=`** | ✅ | teacher | **C3: поиск учеников по ПОХОЖЕМУ нику/имени для приглашения** |
+
+> ⏸️ `GET /users/@:username/profile` и `/:id/follow` — **размонтированы** (соц-слой запаркован, security H3). `GET /users` теперь **без email** (PII).
 
 ### GET /users/search?username=
-Учитель ищет студента по **точному** username (не подстрока — чтобы не энумерировать пользователей). Только `role='student'`.
+Учитель ищет учеников по **похожему** нику ИЛИ имени (iLike `%q%`), `role='student'`, лимит 10, мин. 3 символа. Email **не** отдаётся. Возвращает **массив** (было точное совпадение/объект — изменено фиксом H1, 2026-07-01).
 
 ```
-GET /users/search?username=student_c3
+GET /users/search?username=stud
 
-// Response 200 — alreadyMine:true если это уже свой реальный ученик (есть Student{userId})
-{ "data": { "id", "name", "username", "avatar", "alreadyMine": false } }
-
-// Response 404
-{ "error": "Студент не найден" }
+// Response 200 — список; alreadyMine:true если уже свой реальный ученик (Student{userId})
+{ "data": [ { "id", "name", "username", "avatar", "alreadyMine": false } ] }
 ```
 
 ### PUT /users/me/profile
