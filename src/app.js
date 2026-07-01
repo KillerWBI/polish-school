@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
+const cookieParser = require('cookie-parser');
 const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
@@ -25,6 +26,9 @@ app.use(cors({
 
 // Ограничиваем размер JSON-payload (materials/lessonLink — обычно мелкие)
 app.use(express.json({ limit: '256kb' }));
+
+// Парсинг cookie (refresh-токен лежит в httpOnly-cookie)
+app.use(cookieParser());
 
 // Брут-форс на логин (20 попыток / 15 мин)
 const loginLimiter = rateLimit({

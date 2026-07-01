@@ -6,13 +6,33 @@ const { sendVerificationEmail } = require('../services/email');
 const { validateEmail } = require('../services/emailValidator');
 const { generateUsername } = require('../utils/username');
 
-// Генерирует JWT для пользователя
+// access-токен (короткоживущий, в теле ответа → localStorage/Bearer)
 const signToken = (user) =>
   jwt.sign(
     { id: user.id, role: user.role },
     process.env.JWT_SECRET,
     { expiresIn: process.env.JWT_EXPIRES_IN }
   );
+
+// refresh-токен (30 дней, кладём в httpOnly-cookie; отдельный секрет, fallback на JWT_SECRET)
+const REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET;
+const signRefreshToken = (user) =>
+  jwt.sign({ id: user.id, type: 'refresh' }, REFRESH_SECRET, { expiresIn: '30d' });
+
+const isProd = process.env.NODE_ENV === 'production';
+const REFRESH_COOKIE = 'refreshToken';
+const refreshCookieOpts = {
+  httpOnly: true,                        // JS на фронте не видит → защита от XSS-кражи
+  secure:   isProd,                      // по HTTPS только в проде (в dev http)
+  sameSite: isProd ? 'none' : 'lax',     // 'none' для кросс-доменного прода (нужен secure)
+  path:     '/api/v1/auth',              // cookie шлётся только на auth-эндпоинты
+  maxAge:   30 * 24 * 60 * 60 * 1000,    // 30 дней
+};
+
+// Ставит refresh-cookie рядом с выдачей access — вызывается в login/register.
+const setRefreshCookie = (res, user) => {
+  res.cookie(REFRESH_COOKIE, signRefreshToken(user), refreshCookieOpts);
+};
 
 // Генерирует токен подтверждения email (24ч TTL)
 const generateVerificationToken = () => ({
@@ -69,6 +89,7 @@ const register = async (req, res) => {
 
     const user  = await createUserWithVerification({ name, email, password, role: 'student' });
     const token = signToken(user);
+    setRefreshCookie(res, user);
     res.status(201).json({ data: { token, user: userResponse(user) } });
   } catch (err) {
     if (err.name === 'SequelizeUniqueConstraintError') {
@@ -93,11 +114,45 @@ const login = async (req, res) => {
     }
 
     const token = signToken(user);
+    setRefreshCookie(res, user);
     res.json({ data: { token, user: userResponse(user) } });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Ошибка входа' });
   }
+};
+
+// POST /auth/refresh — читает refresh из httpOnly-cookie, выдаёт новый access.
+// Access истёк → фронт дёргает refresh → если валиден, получает свежий access и продолжает.
+const refresh = async (req, res) => {
+  try {
+    const token = req.cookies?.[REFRESH_COOKIE];
+    if (!token) return res.status(401).json({ error: 'Нет refresh-токена' });
+
+    let payload;
+    try {
+      payload = jwt.verify(token, REFRESH_SECRET);
+    } catch {
+      return res.status(401).json({ error: 'Refresh-токен недействителен' });
+    }
+    if (payload.type !== 'refresh') return res.status(401).json({ error: 'Неверный тип токена' });
+
+    const user = await User.findByPk(payload.id, { attributes: ['id', 'role'] });
+    if (!user) return res.status(401).json({ error: 'Пользователь не найден' });
+
+    // Продлеваем и refresh (скользящее окно) — активный пользователь не разлогинится через 30д.
+    setRefreshCookie(res, user);
+    res.json({ data: { token: signToken(user) } });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Ошибка обновления токена' });
+  }
+};
+
+// POST /auth/logout — гасит refresh-cookie (access протухнет сам).
+const logout = (req, res) => {
+  res.clearCookie(REFRESH_COOKIE, { ...refreshCookieOpts, maxAge: undefined });
+  res.json({ data: { message: 'Выход выполнен' } });
 };
 
 const me = async (req, res) => {
@@ -128,6 +183,7 @@ const registerTeacher = async (req, res) => {
 
     const user  = await createUserWithVerification({ name, email, password, role: 'teacher' });
     const token = signToken(user);
+    setRefreshCookie(res, user);
     res.status(201).json({ data: { token, user: userResponse(user) } });
   } catch (err) {
     if (err.name === 'SequelizeUniqueConstraintError') {
@@ -210,6 +266,6 @@ const changePassword = async (req, res) => {
 };
 
 module.exports = {
-  register, registerTeacher, login, me,
+  register, registerTeacher, login, me, refresh, logout,
   verifyEmail, resendVerification, changePassword,
 };

@@ -7,6 +7,8 @@ const ctrl = require('../controllers/auth.controller');
 router.post('/register',             validate(registerSchema), ctrl.register);
 router.post('/register-teacher',     validate(registerSchema), ctrl.registerTeacher);
 router.post('/login',                validate(loginSchema), ctrl.login);
+router.post('/refresh',              ctrl.refresh);              // refresh-cookie → новый access
+router.post('/logout',               ctrl.logout);               // гасит refresh-cookie
 router.get ('/me',                   auth, ctrl.me);
 router.put ('/password',             auth, validate(changePasswordSchema), ctrl.changePassword);
 router.get ('/verify-email',         ctrl.verifyEmail);          // ?token=...
