@@ -122,16 +122,19 @@ const login = async (req, res) => {
   }
 };
 
-// POST /auth/refresh — читает refresh из httpOnly-cookie, выдаёт новый access.
-// Access истёк → фронт дёргает refresh → если валиден, получает свежий access и продолжает.
+// POST /auth/refresh — читает refresh из httpOnly-cookie, выдаёт НОВЫЙ access.
+// Access истёк → фронт дёргает refresh → если refresh валиден, отдаём свежий access
+// (в теле, фронт кладёт в localStorage) + продлеваем refresh-cookie → фронт повторяет запрос.
 const refresh = async (req, res) => {
   try {
-    const token = req.cookies?.[REFRESH_COOKIE];
-    if (!token) return res.status(401).json({ error: 'Нет refresh-токена' });
+    // 1) достаём refresh-токен из httpOnly-cookie
+    const refreshToken = req.cookies?.[REFRESH_COOKIE];
+    if (!refreshToken) return res.status(401).json({ error: 'Нет refresh-токена' });
 
+    // 2) проверяем его подпись/срок
     let payload;
     try {
-      payload = jwt.verify(token, REFRESH_SECRET);
+      payload = jwt.verify(refreshToken, REFRESH_SECRET);
     } catch {
       return res.status(401).json({ error: 'Refresh-токен недействителен' });
     }
@@ -140,9 +143,12 @@ const refresh = async (req, res) => {
     const user = await User.findByPk(payload.id, { attributes: ['id', 'role'] });
     if (!user) return res.status(401).json({ error: 'Пользователь не найден' });
 
-    // Продлеваем и refresh (скользящее окно) — активный пользователь не разлогинится через 30д.
+    // 3) генерим НОВЫЙ access-токен (то же, что при login) — вернём его в теле
+    const accessToken = signToken(user);
+    // 4) продлеваем refresh-cookie (скользящее окно) — активный юзер не разлогинится через 30д
     setRefreshCookie(res, user);
-    res.json({ data: { token: signToken(user) } });
+
+    res.json({ data: { token: accessToken } });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Ошибка обновления токена' });
