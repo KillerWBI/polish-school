@@ -65,6 +65,9 @@ const fillBuckets = (rows, period, defaults) => {
 const getTeacherAnalytics = async (req, res) => {
   try {
     const teacherId = req.params.userId;
+    // Приватно: аналитику учителя видит только он сам (раньше была публичной —
+    // остаток соц-слоя; после разворота витрины учителя нет, экспозиция убрана).
+    if (req.user.id !== teacherId) return res.status(403).json({ error: 'Доступ запрещён' });
     const period = ['day', 'week', 'month'].includes(req.query.period) ? req.query.period : 'month';
     const cfg = PERIOD_CONFIG[period];
 

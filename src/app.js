@@ -61,6 +61,16 @@ app.use('/api/v1/auth/resend-verification', verifyLimiter);
 // Мониторинг / health check
 app.get('/health', (req, res) => res.json({ status: 'ok', uptime: process.uptime() }));
 
+// Общий лимитер на весь API (защита от абуза/DoS сверх точечных auth-лимитов).
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Слишком много запросов. Попробуйте позже.' },
+});
+app.use('/api/v1', apiLimiter);
+
 // Роуты
 app.use('/api/v1/dashboard',          require('./routes/dashboard.routes'));
 app.use('/api/v1/analytics',          require('./routes/analytics.routes'));
@@ -73,12 +83,16 @@ app.use('/api/v1/individual-lessons', require('./routes/individualLesson.routes'
 app.use('/api/v1/homework',           require('./routes/homework.routes'));
 app.use('/api/v1/attendance',         require('./routes/attendance.routes'));
 app.use('/api/v1/payments',           require('./routes/payment.routes'));
-app.use('/api/v1/lesson-requests',    require('./routes/lessonRequest.routes'));
 app.use('/api/v1/invitations',        require('./routes/invitation.routes'));
-app.use('/api/v1/teachers',           require('./routes/teacher.routes'));
 app.use('/api/v1/students',           require('./routes/student.routes'));
-app.use('/api/v1/posts',              require('./routes/post.routes'));
-app.use('/api/v1/feed',               require('./routes/feed.routes'));
+
+// ⏸️ Соц-слой/маркетплейс запаркован (разворот teacher-first, REVISION.md) —
+// роуты РАЗМОНТИРОВАНЫ (код в репо оставлен, но недоступен снаружи).
+// Вернуть при выделении отдельного соц-сервиса.
+// app.use('/api/v1/lesson-requests', require('./routes/lessonRequest.routes'));
+// app.use('/api/v1/teachers',        require('./routes/teacher.routes'));
+// app.use('/api/v1/posts',           require('./routes/post.routes'));
+// app.use('/api/v1/feed',            require('./routes/feed.routes'));
 
 // Глобальный обработчик ошибок
 app.use((err, req, res, next) => {

@@ -1,4 +1,6 @@
 const { User, Follow, TeacherStudent, LessonRequest, Student } = require('../models');
+const { Op } = require('sequelize');
+const { isAllowedUploadUrl } = require('../utils/cloudinary');
 
 // Поля, которые возвращаем в публичном профиле (без email, password, токенов)
 const PUBLIC_PROFILE_FIELDS = [
@@ -22,9 +24,10 @@ const getAll = async (req, res) => {
     const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit) || 50));
     const offset = (page - 1) * limit;
 
+    // Без email (PII): для пикеров хватает имени/ника/аватара. Email чужих учеников не отдаём.
     const { count, rows } = await User.findAndCountAll({
       where: { role: 'student' },
-      attributes: ['id', 'name', 'email', 'role'],
+      attributes: ['id', 'name', 'username', 'avatar'],
       limit,
       offset,
     });
@@ -101,6 +104,11 @@ const updateProfile = async (req, res) => {
     // Bio: max 300 символов
     if (updates.bio !== undefined && updates.bio !== null && String(updates.bio).length > 300) {
       return res.status(400).json({ error: 'Bio не должно превышать 300 символов' });
+    }
+
+    // avatar/coverImage — только ссылки на наш Cloudinary (анти-фишинг/мусор)
+    if (!isAllowedUploadUrl(updates.avatar) || !isAllowedUploadUrl(updates.coverImage)) {
+      return res.status(400).json({ error: 'Недопустимая ссылка на изображение' });
     }
 
     // Languages: массив объектов { code, level? }
@@ -216,26 +224,38 @@ const getMyStudents = async (req, res) => {
   }
 };
 
-// GET /users/search?username= — учитель ищет студента по точному username (С3, приглашения).
-// Точное совпадение, не подстрока — не даём энумерировать пользователей.
+// GET /users/search?username= — учитель ищет учеников по ПОХОЖЕМУ нику или имени (С3, приглашения).
+// Подстрочный поиск (iLike), но с минимумом 3 символа (схема) и лимитом 10 —
+// достаточно для приглашения, но без выгрузки всей базы. Email не отдаём (PII).
 const searchByUsername = async (req, res) => {
   try {
-    const username = req.validatedQuery.username.toLowerCase();
-    const user = await User.findOne({
-      where: { username, role: 'student' },
+    const q = req.validatedQuery.username.trim().toLowerCase();
+    const like = `%${q}%`;
+
+    const users = await User.findAll({
+      where: {
+        role: 'student',
+        [Op.or]: [
+          { username: { [Op.iLike]: like } },
+          { name:     { [Op.iLike]: like } },
+        ],
+      },
       attributes: ['id', 'name', 'username', 'avatar'],
-    });
-    if (!user) return res.status(404).json({ error: 'Студент не найден' });
-
-    const alreadyMine = await Student.findOne({
-      where: { teacherId: req.user.id, userId: user.id },
-      attributes: ['id'],
+      limit: 10,
+      order: [['username', 'ASC']],
     });
 
-    res.json({ data: { ...user.toJSON(), alreadyMine: !!alreadyMine } });
+    // Пометим, кто уже мой реальный ученик (одним запросом на всех).
+    const ids = users.map(u => u.id);
+    const mine = ids.length
+      ? await Student.findAll({ where: { teacherId: req.user.id, userId: ids }, attributes: ['userId'] })
+      : [];
+    const mineSet = new Set(mine.map(m => m.userId));
+
+    res.json({ data: users.map(u => ({ ...u.toJSON(), alreadyMine: mineSet.has(u.id) })) });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Ошибка поиска студента' });
+    res.status(500).json({ error: 'Ошибка поиска ученика' });
   }
 };
 

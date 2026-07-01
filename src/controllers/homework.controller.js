@@ -2,6 +2,7 @@ const { Homework, HomeworkSubmission, GroupStudent, Lesson, Group, IndividualLes
 const { Op } = require('sequelize');
 const { isHwOwner } = require('../utils/ownership');
 const { getStudentIdsForUser } = require('../utils/students');
+const { isAllowedUploadUrl } = require('../utils/cloudinary');
 
 
 
@@ -174,6 +175,11 @@ const remove = async (req, res) => {
 const submit = async (req, res) => {
   try {
     const { fileUrl, comment } = req.body;
+
+    // Ссылка должна быть на наш Cloudinary (анти-фишинг/мусор в БД).
+    if (!isAllowedUploadUrl(fileUrl)) {
+      return res.status(400).json({ error: 'Недопустимая ссылка на файл' });
+    }
 
     const hw = await Homework.findByPk(req.params.id);
     if (!hw) return res.status(404).json({ error: 'Задание не найдено' });

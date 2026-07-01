@@ -2,7 +2,7 @@ const router = require('express').Router();
 const auth = require('../middleware/auth');
 const ctrl = require('../controllers/analytics.controller');
 
-// Аналитика учителя — публичная (для всех авторизованных).
+// Аналитика учителя — приватная (только сам учитель; проверка в контроллере).
 // ?period=day|week|month (default: month)
 router.get('/teacher/:userId', auth, ctrl.getTeacherAnalytics);
 
