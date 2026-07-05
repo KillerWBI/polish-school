@@ -269,6 +269,16 @@ async function seed() {
   console.log(`   инд. курс:          1 (+ уроки),  разовый инд. урок: 1`);
 }
 
-seed()
+// Режим --clean: только удалить демо (@linguaflow.demo), без пересоздания.
+// Использовать перед публичным запуском: node seed-demo.js --clean
+async function cleanOnly() {
+  console.log('🧹 Удаляю демо-данные (@linguaflow.demo)…');
+  await cleanup();
+  console.log('✅ Демо-данные удалены.');
+}
+
+const run = process.argv.includes('--clean') ? cleanOnly : seed;
+
+run()
   .then(() => process.exit(0))
-  .catch((e) => { console.error('❌ Ошибка сида:', e); process.exit(1); });
+  .catch((e) => { console.error('❌ Ошибка:', e); process.exit(1); });
