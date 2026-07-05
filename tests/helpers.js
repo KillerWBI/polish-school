@@ -52,4 +52,4 @@ async function seedTeacherGraph({ price = 100, present = true } = {}) {
   return { teacher, stuUser, student, group, lesson, att };
 }
 
-module.exports = { token, api, resetDb, createTeacher, createStudentUser, seedTeacherGraph, User, PaymentRecord };
+module.exports = { token, api, resetDb, createTeacher, createStudentUser, seedTeacherGraph, User, Student, Group, PaymentRecord };

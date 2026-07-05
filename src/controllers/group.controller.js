@@ -150,20 +150,13 @@ const addStudent = async (req, res) => {
     if (!group) return res.status(404).json({ error: 'Группа не найдена' });
     if (group.teacherId !== req.user.id) return res.status(403).json({ error: 'Доступ запрещён' });
 
-    // studentId от пикера — это User.id (аккаунт)
-    const user = await User.findByPk(studentId);
-    if (!user || user.role !== 'student') {
-      return res.status(404).json({ error: 'Студент не найден' });
+    // studentId — это Student.id из ростера учителя (реальный ИЛИ заглушка).
+    // Само наличие Student у этого учителя = гейт «мой ученик».
+    const student = await Student.findOne({ where: { id: studentId, teacherId: req.user.id } });
+    if (!student) {
+      return res.status(403).json({ error: 'Этот ученик не в вашем ростере' });
     }
 
-    // Гейт: в группу можно добавить только принятого ученика (через заявку). TeacherStudent — по User.id.
-    const isMine = await TeacherStudent.findOne({ where: { teacherId: req.user.id, studentId } });
-    if (!isMine) {
-      return res.status(403).json({ error: 'Сначала примите этого студента в ученики (через заявку)' });
-    }
-
-    // Резолвим аккаунт в Student-запись этого учителя (find-or-create) и пишем её id в членство
-    const student = await resolveStudent(req.user.id, studentId, user.name);
     const exists = await GroupStudent.findOne({ where: { groupId: group.id, studentId: student.id } });
     if (exists) return res.status(400).json({ error: 'Студент уже в группе' });
 

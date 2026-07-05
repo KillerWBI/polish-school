@@ -211,14 +211,26 @@ const getPublicProfile = async (req, res) => {
 // Только учитель (роут защищён isTeacher).
 const getMyStudents = async (req, res) => {
   try {
-    const links = await TeacherStudent.findAll({
+    // Ростер учителя = все Student-записи (реальные И заглушки). id = Student.id —
+    // единый ключ для добавления в группы/инд.уроки и всех FK (teacher-first, REVISION).
+    const students = await Student.findAll({
       where: { teacherId: req.user.id },
-      include: [{ model: User, as: 'student', attributes: ['id', 'name', 'username', 'avatar', 'email'] }],
+      attributes: ['id', 'userId', 'name', 'contact'],
+      include: [{ model: User, as: 'account', attributes: ['username', 'avatar', 'email'] }],
       order: [['createdAt', 'DESC']],
     });
-    // Отдаём плоский список студентов
-    const students = links.map(l => l.student).filter(Boolean);
-    res.json({ data: students });
+    res.json({
+      data: students.map(s => ({
+        id:            s.id,          // Student.id
+        userId:        s.userId,
+        name:          s.name,
+        username:      s.account?.username ?? null,
+        avatar:        s.account?.avatar ?? null,
+        email:         s.account?.email ?? null,
+        contact:       s.contact,
+        isPlaceholder: !s.userId,
+      })),
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Ошибка получения учеников' });

@@ -56,7 +56,7 @@ const create = async (req, res) => {
     // Ученик определяется тремя способами:
     // 1) урок в рамках курса (individualCourseId) — ученик берётся из курса;
     // 2) заглушка (placeholder) — создаётся новая;
-    // 3) реальный аккаунт (studentId = User.id).
+    // 3) studentId = Student.id из ростера учителя (реальный ИЛИ заглушка).
     let student;
     if (individualCourseId) {
       const course = await IndividualCourse.findByPk(individualCourseId);
@@ -66,10 +66,10 @@ const create = async (req, res) => {
     } else if (placeholder && placeholder.name) {
       student = await createPlaceholder(req.user.id, placeholder.name, placeholder.contact);
     } else {
-      if (!studentId) return res.status(400).json({ error: 'Нужен studentId или placeholder' });
-      const user = await User.findByPk(studentId);
-      if (!user || user.role !== 'student') return res.status(404).json({ error: 'Студент не найден' });
-      student = await resolveStudent(req.user.id, studentId, user.name);
+      if (!studentId) return res.status(400).json({ error: 'Нужен studentId, placeholder или individualCourseId' });
+      const st = await Student.findOne({ where: { id: studentId, teacherId: req.user.id } });
+      if (!st) return res.status(404).json({ error: 'Ученик не найден в вашем ростере' });
+      student = { id: st.id };
     }
     const lesson = await IndividualLesson.create({
       teacherId: req.user.id,
