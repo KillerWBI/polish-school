@@ -157,24 +157,50 @@ const getDebtsForTeacher = async (req, res) => {
     if (studentIds.length === 0) {
       return res.json({ data: [] });
     }
+    const teacherId = req.user.id;
     const students = await Student.findAll({
       where: { id: studentIds },
       attributes: ['id', 'name'],
       include: [{ model: User, as: 'account', attributes: ['email'] }],
     });
-    const data = [];
-    for (const student of students) {
-      const charged = await computeChargedByTeacher(student.id);
-      const paidRecords = await PaymentRecord.findAll({ where: { studentId: student.id, teacherId: req.user.id }, attributes: ['amount'] });
-      const paid = paidRecords.reduce((sum, record) => sum + (parseFloat(record.amount) || 0), 0);
-      data.push({
+
+    // Начислено/оплачено считаем ПАКЕТНО по всем ученикам сразу (было N+1 — по 3 запроса на ученика).
+    const chargedByStudent = new Map();
+    const addCharge = (sid, price) => chargedByStudent.set(sid, (chargedByStudent.get(sid) ?? 0) + (parseFloat(price) || 0));
+
+    // Групповые посещения (present) → цена группы этого учителя
+    const groupAtt = await Attendance.findAll({
+      where: { studentId: studentIds, present: true },
+      attributes: ['studentId'],
+      include: [{
+        model: Lesson, required: true, attributes: ['id'],
+        include: [{ model: Group, required: true, where: { teacherId }, attributes: ['pricePerLesson'] }],
+      }],
+    });
+    for (const a of groupAtt) addCharge(a.studentId, a.Lesson.Group.pricePerLesson);
+
+    // Индивидуальные посещения (present) → цена инд. урока этого учителя
+    const indAtt = await Attendance.findAll({
+      where: { studentId: studentIds, present: true },
+      attributes: ['studentId'],
+      include: [{ model: IndividualLesson, required: true, where: { teacherId }, attributes: ['pricePerLesson'] }],
+    });
+    for (const a of indAtt) addCharge(a.studentId, a.IndividualLesson.pricePerLesson);
+
+    // Оплаты (одним запросом)
+    const paidByStudent = new Map();
+    const payRecords = await PaymentRecord.findAll({ where: { studentId: studentIds, teacherId }, attributes: ['studentId', 'amount'] });
+    for (const r of payRecords) paidByStudent.set(r.studentId, (paidByStudent.get(r.studentId) ?? 0) + (parseFloat(r.amount) || 0));
+
+    const data = students.map(student => {
+      const charged = chargedByStudent.get(student.id) ?? 0;
+      const paid    = paidByStudent.get(student.id) ?? 0;
+      return {
         student: { id: student.id, name: student.name, email: student.account?.email ?? null },
-        charged: charged.get(req.user.id) ?? 0,
-        paid,
-        balance: (charged.get(req.user.id) ?? 0) - paid,
-      });
-    }
-    res.json({data});
+        charged, paid, balance: charged - paid,
+      };
+    });
+    res.json({ data });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Ошибка получения долгов' });

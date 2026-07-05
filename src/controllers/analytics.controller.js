@@ -12,8 +12,18 @@ const { getStudentIdsForUser } = require('../utils/students');
 */
 const PERIOD_CONFIG = {
   day:   { count: 30, pgFormat: 'YYYY-MM-DD',  intervalSql: "30 days" },
-  week:  { count: 12, pgFormat: 'IYYY-"W"IW',  intervalSql: "12 weeks" },
+  week:  { count: 8,  pgFormat: 'IYYY-"W"IW',  intervalSql: "8 weeks" },   // текущая + 7 предыдущих
   month: { count: 6,  pgFormat: 'YYYY-MM',     intervalSql: "6 months" },
+};
+
+// ISO-номер недели в формате Postgres TO_CHAR(date,'IYYY-"W"IW') → "2026-W27"
+const isoWeekBucket = (dt) => {
+  const d = new Date(Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate()));
+  const dayNum = (d.getUTCDay() + 6) % 7;                 // Пн=0 … Вс=6
+  d.setUTCDate(d.getUTCDate() - dayNum + 3);              // четверг этой недели
+  const firstThu = new Date(Date.UTC(d.getUTCFullYear(), 0, 4));
+  const week = 1 + Math.round(((d - firstThu) / 86400000 - 3 + ((firstThu.getUTCDay() + 6) % 7)) / 7);
+  return `${d.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
 };
 
 // JS-эквивалент PG to_char для построения пустых бакетов (см. fillBuckets)
@@ -41,16 +51,15 @@ const formatBucket = (date, period) => {
  */
 const fillBuckets = (rows, period, defaults) => {
   const cfg = PERIOD_CONFIG[period];
-  if (period === 'week') return rows; // week — пропускаем заполнение (см. formatBucket)
-
   const byBucket = new Map(rows.map(r => [r.bucket, r]));
   const out = [];
   const now = new Date();
   for (let i = cfg.count - 1; i >= 0; i--) {
     const d = new Date(now);
-    if (period === 'day')   d.setUTCDate(now.getUTCDate() - i);
-    if (period === 'month') d.setUTCMonth(now.getUTCMonth() - i, 1);
-    const key = formatBucket(d, period);
+    let key;
+    if (period === 'day')   { d.setUTCDate(now.getUTCDate() - i);  key = formatBucket(d, period); }
+    else if (period === 'week') { d.setUTCDate(now.getUTCDate() - i * 7); key = isoWeekBucket(d); }
+    else                    { d.setUTCMonth(now.getUTCMonth() - i, 1); key = formatBucket(d, period); }
     out.push(byBucket.get(key) || { bucket: key, ...defaults });
   }
   return out;
@@ -112,15 +121,40 @@ const getTeacherAnalytics = async (req, res) => {
             AND il.date >= (NOW() - INTERVAL '${cfg.intervalSql}')::date
         ) src
         GROUP BY bucket
+      ),
+      potential AS (
+        SELECT bucket, SUM(price)::float AS total
+        FROM (
+          SELECT TO_CHAR(l.date, :fmt) AS bucket, (g."pricePerLesson" * gs.cnt) AS price
+          FROM "Lessons" l
+            JOIN "Groups" g ON g.id = l."groupId"
+            JOIN (SELECT "groupId", COUNT(*) cnt FROM "GroupStudents" GROUP BY "groupId") gs ON gs."groupId" = g.id
+          WHERE g."teacherId" = :teacherId AND l.date > CURRENT_DATE
+          UNION ALL
+          SELECT TO_CHAR(il.date, :fmt) AS bucket, il."pricePerLesson" AS price
+          FROM "IndividualLessons" il
+          WHERE il."teacherId" = :teacherId AND il.date > CURRENT_DATE
+        ) src
+        GROUP BY bucket
       )
-      SELECT COALESCE(c.bucket, p.bucket) AS bucket,
+      SELECT COALESCE(c.bucket, p.bucket, pot.bucket) AS bucket,
              COALESCE(p.total, 0) AS paid,
-             COALESCE(c.total, 0) AS charged
-      FROM charged c FULL OUTER JOIN paid p ON c.bucket = p.bucket
+             COALESCE(c.total, 0) AS charged,
+             COALESCE(pot.total, 0) AS potential
+      FROM charged c
+        FULL OUTER JOIN paid p ON c.bucket = p.bucket
+        FULL OUTER JOIN potential pot ON COALESCE(c.bucket, p.bucket) = pot.bucket
       ORDER BY 1;
     `, { type: QueryTypes.SELECT, replacements: { teacherId, fmt: cfg.pgFormat } });
 
-    const revenueByPeriod = fillBuckets(revenueRows, period, { paid: 0, charged: 0 });
+    // owed (не оплачено но должны) = начислено − оплачено (кламп ≥0), по каждому бакету
+    const revenueByPeriod = fillBuckets(revenueRows, period, { paid: 0, charged: 0, potential: 0 })
+      .map(r => ({
+        bucket:    r.bucket,
+        paid:      Math.round(r.paid || 0),
+        owed:      Math.max(0, Math.round((r.charged || 0) - (r.paid || 0))),
+        potential: Math.round(r.potential || 0),
+      }));
 
     // ── 2. Активные студенты по месяцам (всегда 6 мес) ─────────────
     // «Активен в месяце M» = был хотя бы на одном подтверждённом посещении
@@ -186,11 +220,51 @@ const getTeacherAnalytics = async (req, res) => {
         )::int AS lessons;
     `, { type: QueryTypes.SELECT, replacements: { teacherId } });
 
+    // ── 5. Прибыль за ВСЁ ВРЕМЯ (сводка) ──────────────────────────
+    //  paid      — всего оплачено
+    //  owed      — всего должны = начислено(проведено) − оплачено (кламп ≥0)
+    //  potential — все будущие запланированные уроки (от завтра) × цена
+    const [totalRow] = await sequelize.query(`
+      WITH paid AS (
+        SELECT COALESCE(SUM(amount),0)::float t FROM "PaymentRecords" WHERE "teacherId" = :teacherId
+      ),
+      charged AS (
+        SELECT COALESCE(SUM(price),0)::float t FROM (
+          SELECT g."pricePerLesson" AS price FROM "Attendances" a
+            JOIN "Lessons" l ON l.id = a."lessonId" JOIN "Groups" g ON g.id = l."groupId"
+            WHERE g."teacherId" = :teacherId AND a.present = true
+          UNION ALL
+          SELECT il."pricePerLesson" AS price FROM "Attendances" a
+            JOIN "IndividualLessons" il ON il.id = a."individualLessonId"
+            WHERE il."teacherId" = :teacherId AND a.present = true
+        ) s
+      ),
+      potential AS (
+        SELECT COALESCE(SUM(price),0)::float t FROM (
+          SELECT (g."pricePerLesson" * gs.cnt) AS price FROM "Lessons" l
+            JOIN "Groups" g ON g.id = l."groupId"
+            JOIN (SELECT "groupId", COUNT(*) cnt FROM "GroupStudents" GROUP BY "groupId") gs ON gs."groupId" = g.id
+            WHERE g."teacherId" = :teacherId AND l.date > CURRENT_DATE
+          UNION ALL
+          SELECT il."pricePerLesson" AS price FROM "IndividualLessons" il
+            WHERE il."teacherId" = :teacherId AND il.date > CURRENT_DATE
+        ) s
+      )
+      SELECT paid.t AS paid, charged.t AS charged, potential.t AS potential FROM paid, charged, potential;
+    `, { type: QueryTypes.SELECT, replacements: { teacherId } });
+
+    const profitTotal = {
+      paid:      Math.round(totalRow?.paid ?? 0),
+      owed:      Math.max(0, Math.round((totalRow?.charged ?? 0) - (totalRow?.paid ?? 0))),
+      potential: Math.round(totalRow?.potential ?? 0),
+    };
+
     res.json({
       data: {
         revenueByPeriod,
         studentsByMonth,
         avgAttendance: attendanceRow?.percent ?? 0,
+        profitTotal,
         totals: totalsRow ?? { students: 0, groups: 0, lessons: 0 },
       },
       meta: { period },

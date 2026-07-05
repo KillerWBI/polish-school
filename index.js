@@ -1,7 +1,12 @@
+require('./instrument'); // Sentry — до всего остального (если задан SENTRY_DSN)
 require('dotenv').config();
 
 // Валидация обязательных env-переменных до старта
 const REQUIRED_ENV = ['JWT_SECRET', 'DB_URL'];
+// В production дополнительно: отдельный секрет refresh-токена и CLIENT_URL (для CORS/refresh-cookie)
+if (process.env.NODE_ENV === 'production') {
+  REQUIRED_ENV.push('JWT_REFRESH_SECRET', 'CLIENT_URL');
+}
 const missing = REQUIRED_ENV.filter(k => !process.env[k]);
 if (missing.length) {
   console.error(`❌ Отсутствуют обязательные env-переменные: ${missing.join(', ')}`);

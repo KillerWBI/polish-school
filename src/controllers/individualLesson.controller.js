@@ -1,4 +1,4 @@
-const { IndividualLesson, User, Homework, Student } = require('../models');
+const { IndividualLesson, IndividualCourse, User, Homework, Student } = require('../models');
 const { Op } = require('sequelize');
 const { getStudentIdsForUser, resolveStudent, createPlaceholder } = require('../utils/students');
 
@@ -53,9 +53,17 @@ const create = async (req, res) => {
     if (!date || !time) {
       return res.status(400).json({ error: 'date и time обязательны' });
     }
-    // Ученик — заглушка (placeholder) ИЛИ реальный аккаунт (studentId)
+    // Ученик определяется тремя способами:
+    // 1) урок в рамках курса (individualCourseId) — ученик берётся из курса;
+    // 2) заглушка (placeholder) — создаётся новая;
+    // 3) реальный аккаунт (studentId = User.id).
     let student;
-    if (placeholder && placeholder.name) {
+    if (individualCourseId) {
+      const course = await IndividualCourse.findByPk(individualCourseId);
+      if (!course) return res.status(404).json({ error: 'Курс не найден' });
+      if (course.teacherId !== req.user.id) return res.status(403).json({ error: 'Доступ запрещён' });
+      student = { id: course.studentId }; // studentId курса — уже Student.id
+    } else if (placeholder && placeholder.name) {
       student = await createPlaceholder(req.user.id, placeholder.name, placeholder.contact);
     } else {
       if (!studentId) return res.status(400).json({ error: 'Нужен studentId или placeholder' });

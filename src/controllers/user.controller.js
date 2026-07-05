@@ -59,8 +59,9 @@ const getOne = async (req, res) => {
 
 const update = async (req, res) => {
   try {
-    // студент может изменять только себя
-    if (req.user.role === 'student' && req.user.id !== req.params.id) {
+    // Менять аккаунт может только его владелец — ни учитель, ни кто-либо ещё
+    // не переименовывает чужие аккаунты. (Заглушки-ученики — это Student, правятся отдельно.)
+    if (req.user.id !== req.params.id) {
       return res.status(403).json({ error: 'Доступ запрещён' });
     }
 

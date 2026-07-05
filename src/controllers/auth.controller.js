@@ -6,12 +6,14 @@ const { sendVerificationEmail } = require('../services/email');
 const { validateEmail } = require('../services/emailValidator');
 const { generateUsername } = require('../utils/username');
 
-// access-токен (короткоживущий, в теле ответа → localStorage/Bearer)
+// access-токен (короткоживущий, в теле ответа → localStorage/Bearer).
+// Дефолт 1ч: при XSS-краже окно мало, refresh-cookie (30д) продлевает сессию.
+// Без дефолта пустой JWT_EXPIRES_IN давал БЕССРОЧНЫЙ токен.
 const signToken = (user) =>
   jwt.sign(
     { id: user.id, role: user.role },
     process.env.JWT_SECRET,
-    { expiresIn: process.env.JWT_EXPIRES_IN }
+    { expiresIn: process.env.JWT_EXPIRES_IN || '1h' }
   );
 
 // refresh-токен (30 дней, кладём в httpOnly-cookie; отдельный секрет, fallback на JWT_SECRET)

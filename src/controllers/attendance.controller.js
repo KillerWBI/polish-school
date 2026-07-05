@@ -1,7 +1,7 @@
 const { Attendance, Lesson, Group, IndividualLesson, Student, User } = require('../models');
 const { Op } = require('sequelize');
 const { isHwOwner } = require('../utils/ownership');
-const { getStudentIdsForUser } = require('../utils/students');
+const { getStudentIdsForUser, getTeacherStudentIds } = require('../utils/students');
 
 // ── Авто-подтверждение: если студент не ответил за 3 дня — засчитываем как учитель ──
 const autoConfirmExpired = async () => {
@@ -41,11 +41,19 @@ const getAll = async (req, res) => {
     const where = {};
     if (req.user.role === 'student') {
       where.studentId = await getStudentIdsForUser(req.user.id); // все Student-записи пользователя
+    } else {
+      // Учитель видит только посещаемость СВОИХ учеников (изоляция арендаторов).
+      // Пустой массив → IN (NULL) → ничего не вернёт (защита от чужого studentId/groupId).
+      const myStudentIds = await getTeacherStudentIds(req.user.id);
+      if (req.query.studentId) {
+        where.studentId = myStudentIds.includes(req.query.studentId) ? [req.query.studentId] : [];
+      } else {
+        where.studentId = myStudentIds;
+      }
     }
 
     if (req.query.lessonId)           where.lessonId           = req.query.lessonId;
     if (req.query.individualLessonId) where.individualLessonId = req.query.individualLessonId;
-    if (req.query.studentId && req.user.role === 'teacher') where.studentId = req.query.studentId;
 
     // Фильтр по статусу: по умолчанию только 'confirmed'
     if (req.query.status) {

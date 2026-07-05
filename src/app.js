@@ -30,12 +30,17 @@ app.use(express.json({ limit: '256kb' }));
 // Парсинг cookie (refresh-токен лежит в httpOnly-cookie)
 app.use(cookieParser());
 
+// Лимитеры — только в production. В dev мешают итерации (hot-reload + дашборд
+// легко выбирают 300/15мин, после чего 429 прилетает и на /auth/login).
+const skipInDev = () => process.env.NODE_ENV !== 'production';
+
 // Брут-форс на логин (20 попыток / 15 мин)
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 20,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: skipInDev,
   message: { error: 'Слишком много попыток входа. Попробуйте через 15 минут.' },
 });
 app.use('/api/v1/auth/login', loginLimiter);
@@ -46,6 +51,7 @@ const registerLimiter = rateLimit({
   max: 5,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: skipInDev,
   message: { error: 'Слишком много попыток регистрации. Попробуйте позже.' },
 });
 app.use('/api/v1/auth/register',         registerLimiter);
@@ -57,6 +63,7 @@ const verifyLimiter = rateLimit({
   max: 10,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: skipInDev,
   message: { error: 'Слишком много попыток. Попробуйте через 15 минут.' },
 });
 app.use('/api/v1/auth/verify-email',       verifyLimiter);
@@ -68,9 +75,10 @@ app.get('/health', (req, res) => res.json({ status: 'ok', uptime: process.uptime
 // Общий лимитер на весь API (защита от абуза/DoS сверх точечных auth-лимитов).
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 300,
+  max: 1000, // SPA делает много запросов на страницу; 300 упирался у активного пользователя
   standardHeaders: true,
   legacyHeaders: false,
+  skip: skipInDev,
   message: { error: 'Слишком много запросов. Попробуйте позже.' },
 });
 app.use('/api/v1', apiLimiter);
