@@ -39,6 +39,15 @@ const User = sequelize.define('User', {
     type: DataTypes.DATE,
     allowNull: true,
   },
+  // Восстановление пароля (Resend)
+  passwordResetToken: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+  passwordResetExpiresAt: {
+    type: DataTypes.DATE,
+    allowNull: true,
+  },
   // Профиль (Instagram-style)
   username: {
     type: DataTypes.STRING(40),

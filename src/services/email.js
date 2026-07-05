@@ -102,6 +102,48 @@ const sendVerificationEmail = async (to, name, token) => {
   return result.data;
 };
 
+// Отправка письма для восстановления пароля (ссылка живёт 1 час)
+const sendPasswordResetEmail = async (to, name, token) => {
+  const resetUrl = `${CLIENT_URL}/reset-password?token=${token}`;
+
+  if (!resend) {
+    console.log('\n┌─────────────────────────────────────────────────────────────────');
+    console.log('│ 📧 EMAIL DEV MODE — сброс пароля (RESEND_API_KEY не задан)');
+    console.log(`│ Получатель: ${to} (${name})`);
+    console.log('│ Ссылка для сброса (скопируй в браузер):');
+    console.log(`│ ${resetUrl}`);
+    console.log('└─────────────────────────────────────────────────────────────────\n');
+    return { id: 'dev-mode', dev: true };
+  }
+
+  const result = await resend.emails.send({
+    from: FROM,
+    to,
+    subject: 'Сброс пароля — LinguaFlow',
+    html: `
+<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif; max-width:520px; margin:0 auto; padding:24px;">
+  <h2 style="color:#0F172A;">Сброс пароля</h2>
+  <p style="color:#475569; font-size:15px; line-height:1.6;">
+    Привет, ${name}!<br/>
+    Мы получили запрос на сброс пароля. Нажми кнопку ниже, чтобы задать новый.
+  </p>
+  <a href="${resetUrl}" style="display:inline-block; margin-top:8px; padding:12px 28px; background:#2563eb; color:white; font-weight:600; text-decoration:none; border-radius:10px;">
+    Задать новый пароль
+  </a>
+  <p style="color:#64748b; font-size:12px; margin-top:20px; line-height:1.5;">
+    Ссылка действует 1 час. Если кнопка не работает, скопируй URL:<br/>
+    <span style="color:#2563eb; word-break:break-all;">${resetUrl}</span>
+  </p>
+  <p style="color:#94a3b8; font-size:12px; margin-top:16px;">
+    Если ты не запрашивал сброс — просто проигнорируй это письмо, пароль останется прежним.
+  </p>
+</div>`,
+  });
+
+  if (result.error) throw new Error(`Resend: ${result.error.message}`);
+  return result.data;
+};
+
 // Уведомление учителю о новой заявке на обучение.
 // Best-effort: вызывающий оборачивает в try/catch, чтобы не блокировать создание заявки.
 const sendLessonRequestEmail = async (to, teacherName, studentName, language) => {
@@ -138,4 +180,4 @@ const sendLessonRequestEmail = async (to, teacherName, studentName, language) =>
   return result.data;
 };
 
-module.exports = { sendVerificationEmail, sendLessonRequestEmail };
+module.exports = { sendVerificationEmail, sendPasswordResetEmail, sendLessonRequestEmail };

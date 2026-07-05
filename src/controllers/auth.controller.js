@@ -2,7 +2,7 @@ const bcrypt = require('bcryptjs');
 const jwt    = require('jsonwebtoken');
 const crypto = require('crypto');
 const { User } = require('../models');
-const { sendVerificationEmail } = require('../services/email');
+const { sendVerificationEmail, sendPasswordResetEmail } = require('../services/email');
 const { validateEmail } = require('../services/emailValidator');
 const { generateUsername } = require('../utils/username');
 
@@ -273,7 +273,65 @@ const changePassword = async (req, res) => {
   }
 };
 
+// Токен сброса пароля живёт 1 час (короче verify — чувствительнее)
+const generateResetToken = () => ({
+  token:     crypto.randomBytes(32).toString('hex'),
+  expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+});
+
+// POST /auth/forgot-password — запрос ссылки на сброс.
+// Всегда 200 (не палим, существует ли email). Письмо — best-effort.
+const forgotPassword = async (req, res) => {
+  try {
+    const { email } = req.body; // нормализован схемой
+    const user = await User.findOne({ where: { email } });
+
+    if (user) {
+      const { token, expiresAt } = generateResetToken();
+      await user.update({ passwordResetToken: token, passwordResetExpiresAt: expiresAt });
+      try {
+        await sendPasswordResetEmail(user.email, user.name, token);
+      } catch (mailErr) {
+        console.error('Не удалось отправить письмо сброса:', mailErr);
+        // не раскрываем ошибку клиенту — отвечаем как обычно
+      }
+    }
+
+    res.json({ data: { message: 'Если такой email зарегистрирован — мы отправили ссылку для сброса.' } });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Ошибка запроса сброса пароля' });
+  }
+};
+
+// POST /auth/reset-password — задать новый пароль по токену из письма
+const resetPassword = async (req, res) => {
+  try {
+    const { token, password } = req.body;
+
+    const user = await User.findOne({ where: { passwordResetToken: token } });
+    if (!user) return res.status(400).json({ error: 'Неверная или устаревшая ссылка' });
+
+    if (user.passwordResetExpiresAt && new Date(user.passwordResetExpiresAt) < new Date()) {
+      return res.status(400).json({ error: 'Срок действия ссылки истёк. Запросите новую.' });
+    }
+
+    const hash = await bcrypt.hash(password, 10);
+    await user.update({
+      password: hash,
+      passwordResetToken: null,
+      passwordResetExpiresAt: null,
+    });
+
+    res.json({ data: { message: 'Пароль обновлён. Теперь войдите с новым паролем.' } });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Ошибка сброса пароля' });
+  }
+};
+
 module.exports = {
   register, registerTeacher, login, me, refresh, logout,
   verifyEmail, resendVerification, changePassword,
+  forgotPassword, resetPassword,
 };

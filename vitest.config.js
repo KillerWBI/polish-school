@@ -7,7 +7,7 @@ module.exports = defineConfig({
     include: ['tests/**/*.test.js'],
     setupFiles: ['./tests/setup.js'],
     fileParallelism: false,                // одна тест-БД → файлы последовательно
-    env: { NODE_ENV: 'test' },             // database.js → TEST_DATABASE_URL
+    env: { NODE_ENV: 'test', RESEND_API_KEY: '' }, // БД → TEST_DATABASE_URL; письма — dev-режим (без сети)
     hookTimeout: 30000,
     testTimeout: 20000,
   },

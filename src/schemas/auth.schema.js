@@ -27,4 +27,15 @@ const changePasswordSchema = z.object({
   newPassword:     z.string({ error: 'newPassword обязателен' }).min(6, 'Новый пароль минимум 6 символов'),
 });
 
-module.exports = { registerSchema, loginSchema, changePasswordSchema };
+// POST /auth/forgot-password — запрос ссылки на сброс (по email)
+const forgotPasswordSchema = z.object({
+  email: emailField,
+});
+
+// POST /auth/reset-password — задать новый пароль по токену из письма
+const resetPasswordSchema = z.object({
+  token:    z.string({ error: 'token обязателен' }).min(1, 'token обязателен'),
+  password: z.string({ error: 'Пароль обязателен' }).min(6, 'Пароль минимум 6 символов'),
+});
+
+module.exports = { registerSchema, loginSchema, changePasswordSchema, forgotPasswordSchema, resetPasswordSchema };

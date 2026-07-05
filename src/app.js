@@ -68,6 +68,8 @@ const verifyLimiter = rateLimit({
 });
 app.use('/api/v1/auth/verify-email',       verifyLimiter);
 app.use('/api/v1/auth/resend-verification', verifyLimiter);
+app.use('/api/v1/auth/forgot-password',    verifyLimiter); // защита от спама письмами сброса
+app.use('/api/v1/auth/reset-password',     verifyLimiter); // защита от перебора токена
 
 // Мониторинг / health check
 app.get('/health', (req, res) => res.json({ status: 'ok', uptime: process.uptime() }));

@@ -1,7 +1,7 @@
 const router = require('express').Router();
 const auth = require('../middleware/auth');
 const { validate } = require('../middleware/validate');
-const { registerSchema, loginSchema, changePasswordSchema } = require('../schemas/auth.schema');
+const { registerSchema, loginSchema, changePasswordSchema, forgotPasswordSchema, resetPasswordSchema } = require('../schemas/auth.schema');
 const ctrl = require('../controllers/auth.controller');
 
 router.post('/register',             validate(registerSchema), ctrl.register);
@@ -13,5 +13,7 @@ router.get ('/me',                   auth, ctrl.me);
 router.put ('/password',             auth, validate(changePasswordSchema), ctrl.changePassword);
 router.get ('/verify-email',         ctrl.verifyEmail);          // ?token=...
 router.post('/resend-verification',  auth, ctrl.resendVerification);
+router.post('/forgot-password',      validate(forgotPasswordSchema), ctrl.forgotPassword); // запрос ссылки на сброс
+router.post('/reset-password',       validate(resetPasswordSchema), ctrl.resetPassword);   // новый пароль по токену
 
 module.exports = router;
