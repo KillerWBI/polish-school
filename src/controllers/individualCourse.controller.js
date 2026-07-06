@@ -1,13 +1,16 @@
-const { IndividualCourse, User, TeacherStudent } = require('../models');
+const { IndividualCourse, User, TeacherStudent, Student } = require('../models');
 const { generateIndividualLessons } = require('../utils/lessonGenerator');
 const { getStudentIdsForUser, resolveStudent, createPlaceholder } = require('../utils/students');
+
+// Ученик курса (Student.id) — чтобы фронт показывал имя (getStudent по /users/:id не годится: там User)
+const studentInclude = { model: Student, as: 'student', attributes: ['id', 'name', 'userId'] };
 
 const getAll = async (req, res) => {
   try {
     const where = req.user.role === 'teacher'
       ? { teacherId: req.user.id }
       : { studentId: await getStudentIdsForUser(req.user.id) };
-    const courses = await IndividualCourse.findAll({ where });
+    const courses = await IndividualCourse.findAll({ where, include: [studentInclude] });
     res.json({ data: courses });
   } catch (err) {
     console.error(err);
@@ -55,7 +58,7 @@ const create = async (req, res) => {
 
 const getOne = async (req, res) => {
   try {
-    const course = await IndividualCourse.findByPk(req.params.id);
+    const course = await IndividualCourse.findByPk(req.params.id, { include: [studentInclude] });
     if (!course) return res.status(404).json({ error: 'Курс не найден' });
 
     if (req.user.role === 'teacher' && course.teacherId !== req.user.id) {
