@@ -57,6 +57,7 @@ const buildTeacherDashboard = async (teacherId) => {
           ],
           order: [['createdAt', 'DESC']],
           limit: 5,
+          subQuery: false,
         }),
       ]);
     }

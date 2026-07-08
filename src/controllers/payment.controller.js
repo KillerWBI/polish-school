@@ -32,23 +32,46 @@ const getStudentDebtTotal = async (studentId) => {
 };
 
 // Сколько учителю должны ВСЕ его ученики суммарно (для KPI дашборда).
-// По каждому ученику: начислено мной − оплачено мне, кламп ≥0,
-// чтобы переплата одного не маскировала долг другого.
+// Три пакетных запроса вместо N*3 — суммирование в JS.
 const getTeacherDebtTotal = async (teacherId) => {
   const studentIds = await getTeacherStudentIds(teacherId);
+  if (!studentIds.length) return 0;
+
+  const chargedByStudent = new Map();
+  const add = (sid, price) =>
+    chargedByStudent.set(sid, (chargedByStudent.get(sid) ?? 0) + (parseFloat(price) || 0));
+
+  // Групповые посещения всех учеников этого учителя
+  const groupAtt = await Attendance.findAll({
+    where: { studentId: studentIds, present: true },
+    attributes: ['studentId'],
+    include: [{
+      model: Lesson, required: true, attributes: ['id'],
+      include: [{ model: Group, required: true, where: { teacherId }, attributes: ['pricePerLesson'] }],
+    }],
+  });
+  for (const a of groupAtt) add(a.studentId, a.Lesson.Group.pricePerLesson);
+
+  // Индивидуальные посещения
+  const indAtt = await Attendance.findAll({
+    where: { studentId: studentIds, present: true },
+    attributes: ['studentId'],
+    include: [{ model: IndividualLesson, required: true, where: { teacherId }, attributes: ['pricePerLesson'] }],
+  });
+  for (const a of indAtt) add(a.studentId, a.IndividualLesson.pricePerLesson);
+
+  // Все оплаты этому учителю
+  const payRecords = await PaymentRecord.findAll({
+    where: { studentId: studentIds, teacherId },
+    attributes: ['studentId', 'amount'],
+  });
+  const paidByStudent = new Map();
+  for (const r of payRecords)
+    paidByStudent.set(r.studentId, (paidByStudent.get(r.studentId) ?? 0) + (parseFloat(r.amount) || 0));
+
   let total = 0;
-  for (const studentId of studentIds) {
-    const charged = await computeChargedByTeacher(studentId);
-    const chargedByMe = charged.get(teacherId) ?? 0;
-
-    const records = await PaymentRecord.findAll({
-      where: { studentId, teacherId },
-      attributes: ['amount'],
-    });
-    const paidToMe = records.reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0);
-
-    total += Math.max(chargedByMe - paidToMe, 0);
-  }
+  for (const sid of studentIds)
+    total += Math.max((chargedByStudent.get(sid) ?? 0) - (paidByStudent.get(sid) ?? 0), 0);
   return total;
 };
 
@@ -262,4 +285,47 @@ const getDebtsForTeacher = async (req, res) => {
   }
 };
 
-module.exports = { computeChargedByTeacher, getDebt, recordPayment, getPaymentHistory, getDebtsForTeacher, getStudentDebtTotal, getTeacherDebtTotal };
+// GET /payments/teacher-info/:teacherId — реквизиты учителя для страницы оплаты ученика
+const getTeacherPaymentInfo = async (req, res) => {
+  try {
+    const teacher = await User.findByPk(req.params.teacherId, {
+      attributes: ['id', 'name', 'paymentDetails'],
+    });
+    if (!teacher) return res.status(404).json({ error: 'Преподаватель не найден' });
+    res.json({ data: { id: teacher.id, name: teacher.name, paymentDetails: teacher.paymentDetails || {} } });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Ошибка получения данных' });
+  }
+};
+
+// POST /payments/student-pay — ученик сам подаёт запись об оплате (со скриншотом)
+const studentRecordPayment = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { teacherId, amount, method, screenshotUrl } = req.body;
+
+    if (!teacherId || !amount || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) {
+      return res.status(400).json({ error: 'Укажите teacherId и сумму' });
+    }
+
+    // Находим Student-запись этого пользователя у этого учителя
+    const student = await Student.findOne({ where: { userId, teacherId } });
+    if (!student) return res.status(403).json({ error: 'Вы не ученик этого преподавателя' });
+
+    const record = await PaymentRecord.create({
+      studentId: student.id,
+      teacherId,
+      amount: parseFloat(amount),
+      method: method || 'transfer',
+      source: 'student',
+      screenshotUrl: screenshotUrl || null,
+    });
+    res.status(201).json({ data: record });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Ошибка записи оплаты' });
+  }
+};
+
+module.exports = { computeChargedByTeacher, getDebt, recordPayment, getPaymentHistory, getDebtsForTeacher, getStudentDebtTotal, getTeacherDebtTotal, getTeacherPaymentInfo, studentRecordPayment };

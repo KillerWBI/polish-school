@@ -71,6 +71,8 @@ const User = sequelize.define('User', {
   phone:           { type: DataTypes.STRING(32),  allowNull: true },
   // [{ code: 'pl', level: 'B2' }] — у учителя level может быть null
   languages: { type: DataTypes.JSONB, allowNull: false, defaultValue: [] },
+  // Реквизиты оплаты учителя (куда переводить деньги за занятия)
+  paymentDetails: { type: DataTypes.JSONB, allowNull: true, defaultValue: null },
 });
 
 module.exports = User;
