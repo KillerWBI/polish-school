@@ -28,11 +28,16 @@ const PaymentRecord = sequelize.define('PaymentRecord', {
     allowNull: false,
     defaultValue: 'cash',
   },
-  // Источник записи: учитель внёс вручную (manual) или пришла через платёжку (online)
+  // Источник записи: учитель вручную (manual), платёжка (online), ученик со скриншотом (student)
   source: {
-    type: DataTypes.ENUM('manual', 'online'),
+    type: DataTypes.ENUM('manual', 'online', 'student'),
     allowNull: false,
     defaultValue: 'manual',
+  },
+  // Скриншот-подтверждение от ученика (Cloudinary URL)
+  screenshotUrl: {
+    type: DataTypes.STRING,
+    allowNull: true,
   },
   paidAt: {
     type: DataTypes.DATE,

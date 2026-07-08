@@ -1,4 +1,5 @@
 const { Group, Lesson, IndividualCourse, IndividualLesson } = require('../models');
+const { generateMeetLink } = require('./meet');
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_RANGE_DAYS = 365;
@@ -64,7 +65,7 @@ const generateGroupLessons = async ({ groupId, from, to }) => {
   for (const slot of slots) {
     const [lesson, isNew] = await Lesson.findOrCreate({
       where: { groupId, date: slot.date, time: slot.time },
-      defaults: { groupId, date: slot.date, time: slot.time },
+      defaults: { groupId, date: slot.date, time: slot.time, lessonLink: generateMeetLink() },
     });
     if (isNew) created.push(lesson);
   }
@@ -89,7 +90,7 @@ const generateIndividualLessons = async ({ courseId, from, to }) => {
         studentId: course.studentId,
         date: slot.date,
         time: slot.time,
-        lessonLink: course.lessonLink,
+        lessonLink: course.lessonLink || generateMeetLink(),
         pricePerLesson: course.pricePerLesson,
       },
     });

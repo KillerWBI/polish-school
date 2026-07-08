@@ -1,6 +1,7 @@
 const { IndividualLesson, IndividualCourse, User, Homework, Student } = require('../models');
 const { Op } = require('sequelize');
 const { getStudentIdsForUser, resolveStudent, createPlaceholder } = require('../utils/students');
+const { generateMeetLink } = require('../utils/meet');
 
 const studentInclude = { model: Student, as: 'student', attributes: ['id', 'name'] };
 
@@ -75,7 +76,9 @@ const create = async (req, res) => {
       teacherId: req.user.id,
       studentId: student.id,
       individualCourseId: individualCourseId || null,
-      date, time, topic, description, lessonLink, pricePerLesson, materials,
+      date, time, topic, description,
+      lessonLink: lessonLink || generateMeetLink(),
+      pricePerLesson, materials,
     });
     res.status(201).json({ data: lesson });
   } catch (err) {

@@ -1,6 +1,7 @@
 const { Lesson, Group, GroupStudent, Homework } = require('../models');
 const { Op } = require('sequelize');
 const { getStudentIdsForUser } = require('../utils/students');
+const { generateMeetLink } = require('../utils/meet');
 
 const groupInclude = { model: Group, attributes: ['id', 'name', 'lessonLink', 'chatLink', 'teacherId'] };
 
@@ -77,7 +78,7 @@ const create = async (req, res) => {
       return res.status(403).json({ error: 'Группа не найдена или доступ запрещён' });
     }
 
-    const lesson = await Lesson.create({ groupId, date, time, topic, description, lessonLink, materials });
+    const lesson = await Lesson.create({ groupId, date, time, topic, description, lessonLink: lessonLink || generateMeetLink(), materials });
     res.status(201).json({ data: lesson });
   } catch (err) {
     // unique (groupId,date,time) — урок на это время уже есть

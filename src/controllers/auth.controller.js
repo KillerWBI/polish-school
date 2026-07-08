@@ -167,7 +167,12 @@ const logout = (req, res) => {
 const me = async (req, res) => {
   try {
     const user = await User.findByPk(req.user.id, {
-      attributes: ['id', 'name', 'username', 'email', 'role', 'plan', 'emailVerified', 'avatar'],
+      attributes: [
+        'id', 'name', 'username', 'email', 'role', 'plan', 'emailVerified',
+        'avatar', 'coverImage', 'bio',
+        'socialTelegram', 'socialWhatsApp', 'socialLinkedIn', 'socialInstagram', 'phone',
+        'languages', 'paymentDetails',
+      ],
     });
     if (!user) return res.status(404).json({ error: 'Пользователь не найден' });
     res.json({ data: user });
