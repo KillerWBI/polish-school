@@ -180,4 +180,70 @@ const sendLessonRequestEmail = async (to, teacherName, studentName, language) =>
   return result.data;
 };
 
-module.exports = { sendVerificationEmail, sendPasswordResetEmail, sendLessonRequestEmail };
+// Напоминание ученику об уроке (за ~24 часа)
+const sendLessonReminderEmail = async (to, studentName, { date, time, topic, lessonLink, teacherName }) => {
+  if (!resend) {
+    console.log(`📧 DEV напоминание об уроке → ${to} | ${date} ${time} | ${teacherName}`);
+    return { id: 'dev-mode', dev: true };
+  }
+  const dashUrl = `${CLIENT_URL}/calendar`;
+  const result = await resend.emails.send({
+    from: FROM,
+    to,
+    subject: `Напоминание: урок завтра ${date} ${time} — LinguaFlow`,
+    html: `
+<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif; max-width:520px; margin:0 auto; padding:24px;">
+  <h2 style="color:#0F172A;">Урок завтра 📅</h2>
+  <p style="color:#475569; font-size:15px; line-height:1.6;">
+    Привет, ${studentName}!<br/>
+    Напоминаем, что завтра у вас занятие с преподавателем <b>${teacherName}</b>:
+  </p>
+  <table style="border-collapse:collapse; width:100%; margin:16px 0;">
+    <tr><td style="padding:6px 0; color:#64748b; width:120px;">Дата</td><td style="color:#0F172A; font-weight:600;">${date}</td></tr>
+    <tr><td style="padding:6px 0; color:#64748b;">Время</td><td style="color:#0F172A; font-weight:600;">${time}</td></tr>
+    ${topic ? `<tr><td style="padding:6px 0; color:#64748b;">Тема</td><td style="color:#0F172A;">${topic}</td></tr>` : ''}
+  </table>
+  ${lessonLink ? `<a href="${lessonLink}" style="display:inline-block; padding:12px 28px; background:#2563eb; color:white; font-weight:600; text-decoration:none; border-radius:10px;">Войти в урок</a>` : ''}
+  <p style="color:#94a3b8; font-size:12px; margin-top:20px;">
+    <a href="${dashUrl}" style="color:#2563eb;">Открыть расписание</a>
+  </p>
+</div>`,
+  });
+  if (result.error) throw new Error(`Resend: ${result.error.message}`);
+  return result.data;
+};
+
+// Напоминание ученику о дедлайне ДЗ (за ~24 часа)
+const sendHomeworkReminderEmail = async (to, studentName, { description, deadline, lessonTitle }) => {
+  if (!resend) {
+    console.log(`📧 DEV напоминание о ДЗ → ${to} | дедлайн ${deadline} | «${description}»`);
+    return { id: 'dev-mode', dev: true };
+  }
+  const hwUrl = `${CLIENT_URL}/homework`;
+  const result = await resend.emails.send({
+    from: FROM,
+    to,
+    subject: `Напоминание: дедлайн ДЗ завтра — LinguaFlow`,
+    html: `
+<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif; max-width:520px; margin:0 auto; padding:24px;">
+  <h2 style="color:#0F172A;">Дедлайн домашнего задания завтра ⏰</h2>
+  <p style="color:#475569; font-size:15px; line-height:1.6;">
+    Привет, ${studentName}!<br/>
+    Завтра истекает срок сдачи домашнего задания.
+  </p>
+  <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:16px; margin:16px 0;">
+    <div style="color:#0F172A; font-weight:600; font-size:15px;">${description}</div>
+    ${lessonTitle ? `<div style="color:#64748b; font-size:13px; margin-top:4px;">${lessonTitle}</div>` : ''}
+    <div style="color:#dc2626; font-size:13px; margin-top:8px;">Дедлайн: ${deadline}</div>
+  </div>
+  <a href="${hwUrl}" style="display:inline-block; padding:12px 28px; background:#2563eb; color:white; font-weight:600; text-decoration:none; border-radius:10px;">Сдать задание</a>
+  <p style="color:#94a3b8; font-size:12px; margin-top:20px;">
+    Если вы уже сдали — ничего не нужно делать.
+  </p>
+</div>`,
+  });
+  if (result.error) throw new Error(`Resend: ${result.error.message}`);
+  return result.data;
+};
+
+module.exports = { sendVerificationEmail, sendPasswordResetEmail, sendLessonRequestEmail, sendLessonReminderEmail, sendHomeworkReminderEmail };

@@ -41,6 +41,15 @@ async function start() {
     app.listen(PORT, () => {
       console.log(`Сервер запущен на порту ${PORT}`);
     });
+
+    // Ежедневные напоминания — в 08:00 UTC (= 10:00 по Варшаве летом).
+    // Находит уроки и дедлайны ДЗ на завтра, шлёт email ученикам с верифицированными аккаунтами.
+    const cron = require('node-cron');
+    const { runReminders } = require('./src/services/reminderService');
+    cron.schedule('0 8 * * *', () => {
+      runReminders().catch(e => console.error('[reminders] ошибка:', e.message));
+    }, { timezone: 'UTC' });
+    console.log('Планировщик напоминаний запущен (08:00 UTC ежедневно)');
   } catch (err) {
     console.error('Ошибка запуска:', err);
     process.exit(1);
