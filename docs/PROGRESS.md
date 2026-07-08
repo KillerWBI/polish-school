@@ -95,11 +95,14 @@
 - [x] **Sprint B:** `GET /analytics/student/:id` — приватный (сам + его учитель); attendance/month, homeworkStats (только ДЗ с прошедшим дедлайном), grades timeline (10 последних), totals
 - [x] **Sprint B:** Helper `utils/analyticsAccess.js` → `canViewStudentAnalytics` — проверка связи через Group↔User belongsToMany + IndividualCourse
 
-#### Admin
-- [ ] Добавить роль `admin` в ENUM модели User + миграция
-- [ ] Middleware `requireAdmin` для admin-роутов
-- [ ] `GET /admin/teachers` — список учителей (count студентов, дата регистрации, статус)
-- [ ] `PATCH /admin/users/:id` — деактивация/активация аккаунта
+#### Admin ✅ 2026-07-09
+- [x] Миграция `20260709000002`: ALTER TYPE enum_Users_role ADD VALUE 'admin' + Users.active BOOLEAN
+- [x] User.js: `role: ENUM('teacher','student','admin')` + `active: BOOLEAN DEFAULT true`
+- [x] `isAdmin` в `role.js`; `isTeacher` теперь пропускает admins
+- [x] `auth.js` async — проверяет `active` в БД на каждый запрос (деактивация немедленная)
+- [x] `admin.controller.js`: `getStats`, `getTeachers`, `getUsers`, `deactivateUser`, `activateUser`, `setUserPlan`
+- [x] `admin.routes.js` → `/api/v1/admin` (все за `auth+isAdmin`)
+- [x] `ADMIN_EMAIL` bootstrap в `index.js`: при старте повышает пользователя с этим email до admin
 
 ### 🟢 Архитектура: слой валидации Zod
 - [x] **`src/middleware/validate.js`** — ✅ 2026-05-31, `validate(schema, source)` → safeParse → 400 или `req[source]=data`
@@ -112,6 +115,8 @@
 ### ⚪ Низкий приоритет
 - [x] N+1 в `payment.calculate` (групповая часть) — ✅ TASK-7 (2026-06-08), один findAll с include вместо циклов
 - [x] **N+1 в `getTeacherDebtTotal`** — ✅ 2026-07-09, три пакетных запроса вместо N×3 (Sprint 1)
+- [x] **Дублирование debt-расчёта** — ✅ 2026-07-09, `fetchChargesAndPayments` хелпер; getTeacherDebtTotal + getDebtsForTeacher используют его
+- [x] **Rate limits на мутирующие эндпоинты** — ✅ 2026-07-09: `writeLimiter` (10/мин) на `POST /payments/record` + `POST /attendance/confirm`
 - [ ] N+1 в `payment.calculate` (индивидуальная часть) — цикл `Attendance.findOne` на каждый урок ещё остаётся
 - [ ] Очистить `buildDateWhere` в `lesson.controller.js`
 - [ ] `GET /payments/debt/:studentId`
