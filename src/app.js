@@ -115,14 +115,6 @@ app.use('/api/v1/students',           require('./routes/student.routes'));
 app.use('/api/v1/ai',                 require('./routes/ai.routes'));
 app.use('/api/v1/quizzes',            require('./routes/quiz.routes'));
 
-// ⏸️ Соц-слой/маркетплейс запаркован (разворот teacher-first, REVISION.md) —
-// роуты РАЗМОНТИРОВАНЫ (код в репо оставлен, но недоступен снаружи).
-// Вернуть при выделении отдельного соц-сервиса.
-// app.use('/api/v1/lesson-requests', require('./routes/lessonRequest.routes'));
-// app.use('/api/v1/teachers',        require('./routes/teacher.routes'));
-// app.use('/api/v1/posts',           require('./routes/post.routes'));
-// app.use('/api/v1/feed',            require('./routes/feed.routes'));
-
 // Глобальный обработчик ошибок
 app.use((err, req, res, next) => {
   console.error(err);
