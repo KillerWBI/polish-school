@@ -84,6 +84,18 @@ app.use('/api/v1/auth/resend-verification', verifyLimiter);
 app.use('/api/v1/auth/forgot-password',    verifyLimiter); // защита от спама письмами сброса
 app.use('/api/v1/auth/reset-password',     verifyLimiter); // защита от перебора токена
 
+// Лимит на запись оплаты и сдачу ДЗ — предотвращаем двойной submit и spam
+const writeLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: skipInDev,
+  message: { error: 'Слишком много запросов. Подождите минуту.' },
+});
+app.use('/api/v1/payments/record',    writeLimiter);
+app.use('/api/v1/attendance/confirm', writeLimiter);
+
 // Мониторинг / health check
 app.get('/health', (req, res) => res.json({ status: 'ok', uptime: process.uptime() }));
 
@@ -114,6 +126,7 @@ app.use('/api/v1/invitations',        require('./routes/invitation.routes'));
 app.use('/api/v1/students',           require('./routes/student.routes'));
 app.use('/api/v1/ai',                 require('./routes/ai.routes'));
 app.use('/api/v1/quizzes',            require('./routes/quiz.routes'));
+app.use('/api/v1/admin',              require('./routes/admin.routes'));
 
 // Глобальный обработчик ошибок
 app.use((err, req, res, next) => {

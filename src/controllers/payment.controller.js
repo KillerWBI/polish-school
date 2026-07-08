@@ -31,43 +31,49 @@ const getStudentDebtTotal = async (studentId) => {
 
 };
 
-// Сколько учителю должны ВСЕ его ученики суммарно (для KPI дашборда).
-// Три пакетных запроса вместо N*3 — суммирование в JS.
-const getTeacherDebtTotal = async (teacherId) => {
-  const studentIds = await getTeacherStudentIds(teacherId);
-  if (!studentIds.length) return 0;
-
+// Три пакетных запроса: начислено и оплачено по каждому ученику для данного учителя.
+// Используется в getTeacherDebtTotal и getDebtsForTeacher — единый источник истины.
+const fetchChargesAndPayments = async (studentIds, teacherId) => {
   const chargedByStudent = new Map();
   const add = (sid, price) =>
     chargedByStudent.set(sid, (chargedByStudent.get(sid) ?? 0) + (parseFloat(price) || 0));
 
-  // Групповые посещения всех учеников этого учителя
-  const groupAtt = await Attendance.findAll({
-    where: { studentId: studentIds, present: true },
-    attributes: ['studentId'],
-    include: [{
-      model: Lesson, required: true, attributes: ['id'],
-      include: [{ model: Group, required: true, where: { teacherId }, attributes: ['pricePerLesson'] }],
-    }],
-  });
+  const [groupAtt, indAtt, payRecords] = await Promise.all([
+    Attendance.findAll({
+      where: { studentId: studentIds, present: true },
+      attributes: ['studentId'],
+      include: [{
+        model: Lesson, required: true, attributes: ['id'],
+        include: [{ model: Group, required: true, where: { teacherId }, attributes: ['pricePerLesson'] }],
+      }],
+    }),
+    Attendance.findAll({
+      where: { studentId: studentIds, present: true },
+      attributes: ['studentId'],
+      include: [{ model: IndividualLesson, required: true, where: { teacherId }, attributes: ['pricePerLesson'] }],
+    }),
+    PaymentRecord.findAll({
+      where: { studentId: studentIds, teacherId },
+      attributes: ['studentId', 'amount'],
+    }),
+  ]);
+
   for (const a of groupAtt) add(a.studentId, a.Lesson.Group.pricePerLesson);
+  for (const a of indAtt)   add(a.studentId, a.IndividualLesson.pricePerLesson);
 
-  // Индивидуальные посещения
-  const indAtt = await Attendance.findAll({
-    where: { studentId: studentIds, present: true },
-    attributes: ['studentId'],
-    include: [{ model: IndividualLesson, required: true, where: { teacherId }, attributes: ['pricePerLesson'] }],
-  });
-  for (const a of indAtt) add(a.studentId, a.IndividualLesson.pricePerLesson);
-
-  // Все оплаты этому учителю
-  const payRecords = await PaymentRecord.findAll({
-    where: { studentId: studentIds, teacherId },
-    attributes: ['studentId', 'amount'],
-  });
   const paidByStudent = new Map();
   for (const r of payRecords)
     paidByStudent.set(r.studentId, (paidByStudent.get(r.studentId) ?? 0) + (parseFloat(r.amount) || 0));
+
+  return { chargedByStudent, paidByStudent };
+};
+
+// Сколько учителю должны ВСЕ его ученики суммарно (для KPI дашборда).
+const getTeacherDebtTotal = async (teacherId) => {
+  const studentIds = await getTeacherStudentIds(teacherId);
+  if (!studentIds.length) return 0;
+
+  const { chargedByStudent, paidByStudent } = await fetchChargesAndPayments(studentIds, teacherId);
 
   let total = 0;
   for (const sid of studentIds)
@@ -242,33 +248,7 @@ const getDebtsForTeacher = async (req, res) => {
       include: [{ model: User, as: 'account', attributes: ['email'] }],
     });
 
-    // Начислено/оплачено считаем ПАКЕТНО по всем ученикам сразу (было N+1 — по 3 запроса на ученика).
-    const chargedByStudent = new Map();
-    const addCharge = (sid, price) => chargedByStudent.set(sid, (chargedByStudent.get(sid) ?? 0) + (parseFloat(price) || 0));
-
-    // Групповые посещения (present) → цена группы этого учителя
-    const groupAtt = await Attendance.findAll({
-      where: { studentId: studentIds, present: true },
-      attributes: ['studentId'],
-      include: [{
-        model: Lesson, required: true, attributes: ['id'],
-        include: [{ model: Group, required: true, where: { teacherId }, attributes: ['pricePerLesson'] }],
-      }],
-    });
-    for (const a of groupAtt) addCharge(a.studentId, a.Lesson.Group.pricePerLesson);
-
-    // Индивидуальные посещения (present) → цена инд. урока этого учителя
-    const indAtt = await Attendance.findAll({
-      where: { studentId: studentIds, present: true },
-      attributes: ['studentId'],
-      include: [{ model: IndividualLesson, required: true, where: { teacherId }, attributes: ['pricePerLesson'] }],
-    });
-    for (const a of indAtt) addCharge(a.studentId, a.IndividualLesson.pricePerLesson);
-
-    // Оплаты (одним запросом)
-    const paidByStudent = new Map();
-    const payRecords = await PaymentRecord.findAll({ where: { studentId: studentIds, teacherId }, attributes: ['studentId', 'amount'] });
-    for (const r of payRecords) paidByStudent.set(r.studentId, (paidByStudent.get(r.studentId) ?? 0) + (parseFloat(r.amount) || 0));
+    const { chargedByStudent, paidByStudent } = await fetchChargesAndPayments(studentIds, teacherId);
 
     const data = students.map(student => {
       const charged = chargedByStudent.get(student.id) ?? 0;

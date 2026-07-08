@@ -18,6 +18,23 @@ const sequelize = require('./src/config/database');
 
 const PORT = process.env.PORT || 5000;
 
+// Если задан ADMIN_EMAIL — ищет пользователя с таким email и выставляет ему role='admin'.
+// Запускается один раз при старте; безопасно повторно (UPDATE WHERE role != 'admin' не меняет ничего).
+async function bootstrapAdmin() {
+  const adminEmail = process.env.ADMIN_EMAIL;
+  if (!adminEmail) return;
+  const { User } = require('./src/models');
+  const user = await User.findOne({ where: { email: adminEmail.toLowerCase().trim() } });
+  if (!user) {
+    console.warn(`⚠️  ADMIN_EMAIL задан (${adminEmail}), но пользователь не найден`);
+    return;
+  }
+  if (user.role !== 'admin') {
+    await user.update({ role: 'admin' });
+    console.log(`✅ Пользователь ${adminEmail} повышен до admin`);
+  }
+}
+
 async function start() {
   try {
     await sequelize.authenticate();
@@ -37,6 +54,8 @@ async function start() {
     } else {
       console.log('Production: синхронизация через миграции (npm run db:migrate)');
     }
+
+    await bootstrapAdmin();
 
     app.listen(PORT, () => {
       console.log(`Сервер запущен на порту ${PORT}`);
