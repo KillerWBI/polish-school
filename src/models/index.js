@@ -15,6 +15,7 @@ const Post = require('./Post');
 const PostLike = require('./PostLike');
 const Student = require('./Student');
 const Invitation = require('./Invitation');
+const Quiz = require('./Quiz');
 
 // Group ↔ User (teacher)
 Group.belongsTo(User, { foreignKey: 'teacherId', as: 'teacher' });
@@ -92,6 +93,14 @@ Invitation.belongsTo(User, { foreignKey: 'teacherId', as: 'teacher' });
 Invitation.belongsTo(User, { foreignKey: 'inviteeUserId', as: 'invitee' });
 Invitation.belongsTo(Group, { foreignKey: 'groupId' });
 
+// Quiz ↔ User (владелец: учитель или ученик — кто создал/прошёл)
+Quiz.belongsTo(User, { foreignKey: 'teacherId', as: 'teacher' });
+Quiz.belongsTo(User, { foreignKey: 'teacherId', as: 'owner' }); // алиас для читаемости (владелец = проходивший)
+User.hasMany(Quiz, { foreignKey: 'teacherId', as: 'quizzes' });
+
+// Homework ↔ Quiz (прикреплённый тест)
+Homework.belongsTo(Quiz, { foreignKey: 'quizId', as: 'quiz' });
+
 module.exports = {
   User,
   Group,
@@ -110,4 +119,5 @@ module.exports = {
   PostLike,
   Student,
   Invitation,
+  Quiz,
 };

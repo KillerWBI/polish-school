@@ -1,3 +1,4 @@
+const { Op } = require('sequelize');
 const { PaymentRecord, Attendance, Lesson, IndividualLesson, Group, User, Student } = require('../models');
 const { getStudentIdsForUser, getTeacherStudentIds } = require('../utils/students');
 
@@ -89,21 +90,75 @@ const computeChargedByTeacher = async (studentId) => {
   return charged;
 };
 
-// POST /payments/record — учитель вносит оплату от ученика
+// POST /payments/record — учитель вносит оплату от ученика (вручную)
 const recordPayment = async (req, res) => {
   try {
     const teacherId = req.user.id;
-    const { studentId, amount } = req.body;
+    const { studentId, amount, method } = req.body;
 
     // studentId — это Student.id; проверяем, что эта запись принадлежит учителю
     const student = await Student.findOne({ where: { id: studentId, teacherId } });
     if (!student) return res.status(403).json({ error: 'Этот ученик не в вашем ростере' });
 
-    const record = await PaymentRecord.create({ studentId, teacherId, amount });
+    // source='manual' — оплату внёс учитель руками (онлайн-платёжка проставит 'online')
+    const record = await PaymentRecord.create({
+      studentId, teacherId, amount, method: method || 'cash', source: 'manual',
+    });
     res.status(201).json({ data: record });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Ошибка записи оплаты' });
+  }
+};
+
+// GET /payments/history — история оплат учителя с фильтрами (?studentId=&method=&from=&to=)
+// Возвращает список записей + сводку { total, byMethod } по этому фильтру.
+const getPaymentHistory = async (req, res) => {
+  try {
+    const teacherId = req.user.id;
+    const { studentId, method, from, to } = req.query;
+
+    const where = { teacherId };
+    if (studentId) where.studentId = studentId;
+    if (method) where.method = method;
+    if (from || to) {
+      where.paidAt = {};
+      if (from) where.paidAt[Op.gte] = new Date(from);
+      if (to) {
+        const end = new Date(to);
+        end.setHours(23, 59, 59, 999); // включаем весь день «to»
+        where.paidAt[Op.lte] = end;
+      }
+    }
+
+    const records = await PaymentRecord.findAll({
+      where,
+      order: [['paidAt', 'DESC']],
+      include: [{ model: Student, as: 'student', attributes: ['id', 'name'] }],
+    });
+
+    // Сводка по способам оплаты (в рамках текущего фильтра)
+    const byMethod = {};
+    let total = 0;
+    for (const r of records) {
+      const amt = parseFloat(r.amount) || 0;
+      total += amt;
+      byMethod[r.method] = (byMethod[r.method] ?? 0) + amt;
+    }
+
+    const data = records.map((r) => ({
+      id: r.id,
+      amount: parseFloat(r.amount) || 0,
+      method: r.method,
+      source: r.source,
+      paidAt: r.paidAt,
+      student: r.student ? { id: r.student.id, name: r.student.name } : null,
+    }));
+
+    res.json({ data, summary: { total, byMethod } });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Ошибка получения истории оплат' });
   }
 };
 
@@ -207,4 +262,4 @@ const getDebtsForTeacher = async (req, res) => {
   }
 };
 
-module.exports = { computeChargedByTeacher, getDebt, recordPayment, getDebtsForTeacher, getStudentDebtTotal, getTeacherDebtTotal };
+module.exports = { computeChargedByTeacher, getDebt, recordPayment, getPaymentHistory, getDebtsForTeacher, getStudentDebtTotal, getTeacherDebtTotal };

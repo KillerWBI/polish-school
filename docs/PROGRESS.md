@@ -38,7 +38,7 @@
 | Individual Lessons | ✅ | — |
 | Homework | ✅ | Multi-tenancy дыры закрыты 2026-05-31 (#1-#3). Zod-валидация подключена (референс-модуль) |
 | Attendance | ✅ | Dual confirmation: `pending_student → confirmed/disputed`. Авто-confirm через 3 дня. Migration `20260609000001` нужна на сервере (`npm run db:migrate`). Полное описание → [ATTENDANCE-CONFIRMATION.md](ATTENDANCE-CONFIRMATION.md) |
-| Payments | ✅ | **Переписан на live-долг (2026-06-22):** помесячная `Payment` удалена; долг = посещения (`charged`) − `PaymentRecord` (`paid`). Эндпоинты: `GET /payments/debt` (студент), `GET /payments/debts` (учитель), `POST /payments/record`. N+1 в долге по ученикам остаётся (цикл) — оптимизация позже |
+| Payments | ✅ | **Переписан на live-долг (2026-06-22):** помесячная `Payment` удалена; долг = посещения (`charged`) − `PaymentRecord` (`paid`). Эндпоинты: `GET /payments/debt` (студент), `GET /payments/debts` (учитель), `POST /payments/record`. N+1 в долге по ученикам остаётся (цикл) — оптимизация позже. **2026-07-06:** `PaymentRecord` получил `method` (cash/card/transfer/online) + `source` (manual/online), миграция `20260707000001`; `record` принимает `method` (source='manual'); новый `GET /payments/history` (фильтры studentId/method/from/to + сводка byMethod) |
 | Invitations | ✅ (бэк) | C3 механика B (2026-06-28): приглашение учитель→ученик в группу. `GET /users/search`, `POST /groups/:id/invitations`, `GET /invitations`, `PATCH /invitations/:id`. Гейт `TeacherStudent` параллельно. Фронт Ф5–Ф6 в работе |
 
 ---

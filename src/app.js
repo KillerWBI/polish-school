@@ -99,6 +99,8 @@ app.use('/api/v1/attendance',         require('./routes/attendance.routes'));
 app.use('/api/v1/payments',           require('./routes/payment.routes'));
 app.use('/api/v1/invitations',        require('./routes/invitation.routes'));
 app.use('/api/v1/students',           require('./routes/student.routes'));
+app.use('/api/v1/ai',                 require('./routes/ai.routes'));
+app.use('/api/v1/quizzes',            require('./routes/quiz.routes'));
 
 // ⏸️ Соц-слой/маркетплейс запаркован (разворот teacher-first, REVISION.md) —
 // роуты РАЗМОНТИРОВАНЫ (код в репо оставлен, но недоступен снаружи).

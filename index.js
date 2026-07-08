@@ -25,8 +25,15 @@ async function start() {
 
     // В разработке — автосинхронизация схемы (alter); в production — только миграции (npm run db:migrate)
     if (process.env.NODE_ENV !== 'production') {
-      await sequelize.sync({ alter: true });
-      console.log('Модели синхронизированы (dev)');
+      try {
+        await sequelize.sync({ alter: true });
+        console.log('Модели синхронизированы (dev)');
+      } catch (syncErr) {
+        // alter-синк иногда падает на пересоздании внешних ключей (напр. Lessons_groupId_fkey,
+        // констрейнт уже под другим именем) — это косметика, схема ведётся миграциями.
+        // Не роняем dev-сервер из-за этого.
+        console.warn('⚠️  sync(alter) пропущен (не критично, схема — через миграции):', syncErr.message);
+      }
     } else {
       console.log('Production: синхронизация через миграции (npm run db:migrate)');
     }

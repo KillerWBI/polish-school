@@ -431,6 +431,10 @@ GET /users/@ivan_petrov/profile
 | POST | `/homework/:id/submit` | ✅ | **student** | Сдать ДЗ |
 | GET | `/homework/:id/submissions` | ✅ | teacher | Все сдачи по заданию |
 | PUT | `/homework/:id/submissions/:subId` | ✅ | teacher | Выставить оценку |
+| POST | `/homework/:id/quiz-attempt` | ✅ | student/teacher | Пройти прикреплённый тест (ответы+результат; вопросы с сервера) |
+| GET | `/homework/:id/quiz-attempts` | ✅ | teacher | Прохождения теста учениками (с ответами) |
+
+> ДЗ может иметь прикреплённый тест: `POST/PUT /homework` принимают `quizId` (тест из библиотеки учителя, `Quiz` c `!taken`). `GET /homework` и `/homework/:id` возвращают `quiz` (id/topic/type/questions). Прохождение сохраняется как `Quiz`-строка (владелец=проходивший, `homeworkId` set) → видно в «Мои тесты» ученика и в `quiz-attempts` учителя.
 
 ### POST /homework
 ```json
@@ -493,7 +497,8 @@ GET /users/@ivan_petrov/profile
 |--------|------|------|------|----------|
 | GET | `/payments/debt` | ✅ | student | Мой долг по каждому учителю |
 | GET | `/payments/debts` | ✅ | teacher | Долг каждого моего ученика |
-| POST | `/payments/record` | ✅ | teacher | Внести оплату от ученика |
+| GET | `/payments/history` | ✅ | teacher | История оплат с фильтрами + сводка по способам |
+| POST | `/payments/record` | ✅ | teacher | Внести оплату от ученика (со способом) |
 
 ### GET /payments/debt (студент)
 ```json
@@ -511,18 +516,52 @@ GET /users/@ivan_petrov/profile
 { "data": [{ "student": { "id", "name", "email" }, "charged", "paid", "balance" }] }
 ```
 
+### GET /payments/history (учитель)
+```json
+// Query (все опциональны): ?studentId=<uuid>&method=cash|card|transfer|online&from=YYYY-MM-DD&to=YYYY-MM-DD
+// teacherId берётся из токена; список только своих оплат, сортировка по paidAt DESC
+// Response 200
+{
+  "data": [{ "id", "amount", "method", "source", "paidAt", "student": { "id", "name" } }],
+  "summary": { "total": 450, "byMethod": { "cash": 300, "card": 150 } }
+}
+// summary считается в рамках текущего фильтра
+```
+
 ### POST /payments/record (учитель)
 ```json
 // Body (Zod recordPaymentSchema)
-{ "studentId": "<uuid>", "amount": 150 }   // amount > 0
-// Проверка: studentId должен быть принятым учеником (TeacherStudent).
+{ "studentId": "<uuid>", "amount": 150, "method": "cash" }
+// amount > 0; method ∈ cash|card|transfer|online (опц., по умолчанию cash); source='manual' (сервер)
+// Проверка: studentId должен быть учеником ростера учителя (Student.teacherId).
 // teacherId и paidAt проставляет сервер.
 
 // Response 201
-{ "data": { "id", "studentId", "teacherId", "amount", "paidAt" } }
+{ "data": { "id", "studentId", "teacherId", "amount", "method", "source", "paidAt" } }
 ```
 
 ---
+
+## AI-тесты (генератор + сохранённые тесты)
+
+Генерация — через OpenAI-совместимый провайдер (по умолчанию Groq, ключ `AI_API_KEY` в .env; нет ключа → 503). Сохранённые тесты — модель `Quiz` (JSONB `questions`), только свои.
+
+| Method | Path | Auth | Role | Описание |
+|--------|------|------|------|----------|
+| POST | `/ai/quiz` | ✅ | teacher | Сгенерировать тест по теме (не сохраняет) |
+| GET | `/quizzes` | ✅ | teacher | Мои сохранённые тесты (мета + count) |
+| GET | `/quizzes/:id` | ✅ | teacher | Полный тест (с вопросами), только свой |
+| POST | `/quizzes` | ✅ | teacher | Сохранить тест |
+| DELETE | `/quizzes/:id` | ✅ | teacher | Удалить свой тест |
+
+```json
+// POST /ai/quiz — Body (Zod quizSchema)
+{ "topic": "Дроби", "count": 5, "difficulty": "medium", "type": "single", "language": "русский" }
+// type ∈ single|multiple|truefalse|open. Response 200:
+{ "data": { "topic","type",..., "questions": [ { "question","options":[],"answer":[0],"sampleAnswer","explanation" } ] } }
+
+// POST /quizzes — Body: { topic, type, difficulty?, language?, questions:[...] } → 201 { data: <Quiz> }
+```
 
 ## Invitations (приглашения в группу, C3 механика B)
 > Приглашение **учитель→ученик** в группу. Направление противоположно запаркованному `LessonRequest` (там ученик→учитель), поэтому отдельная модель.

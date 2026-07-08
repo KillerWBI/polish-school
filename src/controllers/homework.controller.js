@@ -1,4 +1,4 @@
-const { Homework, HomeworkSubmission, GroupStudent, Lesson, Group, IndividualLesson, User, Student } = require('../models');
+const { Homework, HomeworkSubmission, GroupStudent, Lesson, Group, IndividualLesson, User, Student, Quiz } = require('../models');
 const { Op } = require('sequelize');
 const { isHwOwner } = require('../utils/ownership');
 const { getStudentIdsForUser } = require('../utils/students');
@@ -78,11 +78,12 @@ const getAll = async (req, res) => {
       return res.json({ data: [], pagination: { page, limit, total: 0, pages: 0 } });
     }
 
-    // Студенту подмешиваем его сдачу (для статуса на фронте); учителю — нет.
+    // Прикреплённый тест (обе роли видят). Студенту — ещё его сдачу (для статуса).
     const myStudentIds = req.user.role === 'student' ? await getStudentIdsForUser(req.user.id) : [];
-    const include = req.user.role === 'student'
-      ? [{ model: HomeworkSubmission, required: false, where: { studentId: myStudentIds } }]
-      : [];
+    const include = [{ model: Quiz, as: 'quiz', attributes: ['id', 'topic', 'type', 'questions'] }];
+    if (req.user.role === 'student') {
+      include.push({ model: HomeworkSubmission, required: false, where: { studentId: myStudentIds } });
+    }
 
     const { count, rows } = await Homework.findAndCountAll({
       where: { [Op.or]: orConditions },
@@ -102,7 +103,13 @@ const create = async (req, res) => {
   try {
     // Формат/обязательность/взаимоисключение/будущий deadline уже проверены
     // схемой createHomework (middleware validate). Здесь — только ownership.
-    const { lessonId, individualLessonId, description, deadline } = req.body;
+    const { lessonId, individualLessonId, description, deadline, quizId } = req.body;
+
+    // Прикреплённый тест должен принадлежать этому учителю
+    if (quizId) {
+      const q = await Quiz.findOne({ where: { id: quizId, teacherId: req.user.id } });
+      if (!q) return res.status(403).json({ error: 'Тест не найден или не ваш' });
+    }
 
     // Ownership check
     if (lessonId) {
@@ -118,7 +125,7 @@ const create = async (req, res) => {
         return res.status(403).json({ error: 'Урок не найден или доступ запрещён' });
     }
 
-    const hw = await Homework.create({ lessonId, individualLessonId, description, deadline });
+    const hw = await Homework.create({ lessonId, individualLessonId, description, deadline, quizId: quizId || null });
     res.status(201).json({ data: hw });
   } catch (err) {
     console.error(err);
@@ -129,7 +136,9 @@ const create = async (req, res) => {
 // S3: читать ДЗ может только владелец-учитель ИЛИ студент этого урока.
 const getOne = async (req, res) => {
   try {
-    const hw = await Homework.findByPk(req.params.id);
+    const hw = await Homework.findByPk(req.params.id, {
+      include: [{ model: Quiz, as: 'quiz', attributes: ['id', 'topic', 'type', 'questions'] }],
+    });
     if (!hw) return res.status(404).json({ error: 'Задание не найдено' });
 
     const allowed = req.user.role === 'teacher'
@@ -149,8 +158,12 @@ const update = async (req, res) => {
     const hw = await Homework.findByPk(req.params.id);
     if (!hw) return res.status(404).json({ error: 'Задание не найдено' });
     if (!await isHwOwner(hw, req.user.id)) return res.status(403).json({ error: 'Доступ запрещён' });
-    const { description, deadline } = req.body;
-    await hw.update({ description, deadline });
+    const { description, deadline, quizId } = req.body;
+    if (quizId) {
+      const q = await Quiz.findOne({ where: { id: quizId, teacherId: req.user.id } });
+      if (!q) return res.status(403).json({ error: 'Тест не найден или не ваш' });
+    }
+    await hw.update({ description, deadline, ...(quizId !== undefined ? { quizId: quizId || null } : {}) });
     res.json({ data: hw });
   } catch (err) {
     console.error(err);
@@ -251,4 +264,62 @@ const gradeSubmission = async (req, res) => {
   }
 };
 
-module.exports = { getAll, create, getOne, update, remove, submit, getSubmissions, gradeSubmission };
+// POST /homework/:id/quiz-attempt — ученик (или учитель-владелец) проходит прикреплённый тест.
+// Вопросы берём с сервера из прикреплённого теста; клиент шлёт только ответы и результат.
+const submitQuizAttempt = async (req, res) => {
+  try {
+    const hw = await Homework.findByPk(req.params.id);
+    if (!hw) return res.status(404).json({ error: 'Задание не найдено' });
+    if (!hw.quizId) return res.status(400).json({ error: 'К заданию не прикреплён тест' });
+
+    const allowed = req.user.role === 'teacher'
+      ? await isHwOwner(hw, req.user.id)
+      : !!(await resolveAccessStudentId(hw, await getStudentIdsForUser(req.user.id)));
+    if (!allowed) return res.status(403).json({ error: 'Это задание не относится к вам' });
+
+    const source = await Quiz.findByPk(hw.quizId);
+    if (!source) return res.status(404).json({ error: 'Тест не найден' });
+
+    const { answers, score, total } = req.body;
+    const attempt = await Quiz.create({
+      teacherId: req.user.id,               // владелец = проходивший
+      topic: source.topic, type: source.type, difficulty: source.difficulty, language: source.language,
+      questions: source.questions,
+      answers: answers || {}, score: score ?? null, total: total ?? null,
+      homeworkId: hw.id, sourceQuizId: source.id,
+    });
+    res.status(201).json({ data: attempt });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Ошибка сохранения прохождения' });
+  }
+};
+
+// GET /homework/:id/quiz-attempts — учитель-владелец видит прохождения теста учениками (с ответами).
+const getQuizAttempts = async (req, res) => {
+  try {
+    const hw = await Homework.findByPk(req.params.id);
+    if (!hw) return res.status(404).json({ error: 'Задание не найдено' });
+    if (!await isHwOwner(hw, req.user.id)) return res.status(403).json({ error: 'Доступ запрещён' });
+
+    const attempts = await Quiz.findAll({
+      where: { homeworkId: hw.id },
+      include: [{ model: User, as: 'owner', attributes: ['id', 'name'] }],
+      order: [['createdAt', 'DESC']],
+    });
+    const data = attempts.map((a) => ({
+      id: a.id,
+      student: a.owner ? { id: a.owner.id, name: a.owner.name } : null,
+      topic: a.topic, type: a.type,
+      questions: a.questions, answers: a.answers,
+      score: a.score, total: a.total,
+      createdAt: a.createdAt,
+    }));
+    res.json({ data });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Ошибка получения прохождений' });
+  }
+};
+
+module.exports = { getAll, create, getOne, update, remove, submit, getSubmissions, gradeSubmission, submitQuizAttempt, getQuizAttempts };

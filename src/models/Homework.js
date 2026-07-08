@@ -24,6 +24,11 @@ const Homework = sequelize.define('Homework', {
     type: DataTypes.DATE,
     allowNull: true,
   },
+  // Прикреплённый тест (из библиотеки учителя). null — теста нет.
+  quizId: {
+    type: DataTypes.UUID,
+    allowNull: true,
+  },
 });
 
 module.exports = Homework;

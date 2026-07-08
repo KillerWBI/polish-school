@@ -22,6 +22,18 @@ const PaymentRecord = sequelize.define('PaymentRecord', {
     type: DataTypes.DECIMAL(10, 2),
     allowNull: false,
   },
+  // Способ оплаты: наличные / карта / перевод / онлайн-платёж
+  method: {
+    type: DataTypes.ENUM('cash', 'card', 'transfer', 'online'),
+    allowNull: false,
+    defaultValue: 'cash',
+  },
+  // Источник записи: учитель внёс вручную (manual) или пришла через платёжку (online)
+  source: {
+    type: DataTypes.ENUM('manual', 'online'),
+    allowNull: false,
+    defaultValue: 'manual',
+  },
   paidAt: {
     type: DataTypes.DATE,
     allowNull: false,

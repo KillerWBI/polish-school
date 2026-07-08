@@ -5,8 +5,10 @@ const { z } = require('zod');
 // deadline опционален, но если есть — валидная дата В БУДУЩЕМ.
 const createHomework = z.object({
   description:        z.string().trim().min(1, 'Описание обязательно'),
-  lessonId:          z.uuid().optional(),
-  individualLessonId: z.uuid().optional(),
+  // Форма шлёт неиспользуемый id как null → принимаем null (XOR ниже трактует его как «нет»)
+  lessonId:          z.uuid().nullable().optional(),
+  individualLessonId: z.uuid().nullable().optional(),
+  quizId:            z.uuid().nullable().optional(), // прикреплённый тест (необязательно)
   deadline:          z.coerce.date()
                        .refine(d => d >= new Date(), 'Дата окончания должна быть в будущем')
                        .optional(),
@@ -19,6 +21,15 @@ const createHomework = z.object({
 const updateHomework = z.object({
   description: z.string().trim().min(1, 'Описание не может быть пустым').optional(),
   deadline:    z.coerce.date().optional(),
+  quizId:      z.uuid().nullable().optional(),
+});
+
+// POST /homework/:id/quiz-attempt — прохождение прикреплённого теста (ученик).
+// Вопросы/тип берём с сервера из прикреплённого теста; клиент шлёт только ответы и результат.
+const quizAttempt = z.object({
+  answers: z.any().optional(),
+  score:   z.number().int().nullable().optional(),
+  total:   z.number().int().nullable().optional(),
 });
 
 // POST /homework/:id/submit — сдача. Можно сдать пустую (только коммент или вовсе пусто).
@@ -36,4 +47,4 @@ const gradeSubmission = z.object({
   ]).optional(),
 });
 
-module.exports = { createHomework, updateHomework, submitHomework, gradeSubmission };
+module.exports = { createHomework, updateHomework, submitHomework, gradeSubmission, quizAttempt };

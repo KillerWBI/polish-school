@@ -25,6 +25,12 @@ const User = sequelize.define('User', {
     allowNull: false,
     defaultValue: 'student',
   },
+  // Тариф учителя (SaaS-подписка). Оплата подписки — позже, через платёжку.
+  plan: {
+    type: DataTypes.ENUM('free', 'pro', 'school'),
+    allowNull: false,
+    defaultValue: 'free',
+  },
   // Email verification (Resend)
   emailVerified: {
     type: DataTypes.BOOLEAN,
