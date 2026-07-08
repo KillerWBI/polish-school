@@ -7,12 +7,8 @@ const IndividualLesson = require('./IndividualLesson');
 const Homework = require('./Homework');
 const HomeworkSubmission = require('./HomeworkSubmission');
 const Attendance = require('./Attendance');
-const Follow = require('./Follow');
-const LessonRequest = require('./LessonRequest');
 const TeacherStudent = require('./TeacherStudent');
 const PaymentRecord = require('./PaymentRecord');
-const Post = require('./Post');
-const PostLike = require('./PostLike');
 const Student = require('./Student');
 const Invitation = require('./Invitation');
 const Quiz = require('./Quiz');
@@ -57,14 +53,6 @@ Attendance.belongsTo(Lesson, { foreignKey: 'lessonId' });
 Attendance.belongsTo(IndividualLesson, { foreignKey: 'individualLessonId' });
 Attendance.belongsTo(Student, { foreignKey: 'studentId', as: 'student' });
 
-// Follow ↔ User (подписка: follower → following)
-Follow.belongsTo(User, { foreignKey: 'followerId',  as: 'follower' });
-Follow.belongsTo(User, { foreignKey: 'followingId', as: 'following' });
-
-// LessonRequest ↔ User (студент-заявитель + учитель-получатель)
-LessonRequest.belongsTo(User, { foreignKey: 'studentId', as: 'student' });
-LessonRequest.belongsTo(User, { foreignKey: 'teacherId', as: 'teacher' });
-
 // TeacherStudent ↔ User (отношение «мой ученик»)
 TeacherStudent.belongsTo(User, { foreignKey: 'studentId', as: 'student' });
 TeacherStudent.belongsTo(User, { foreignKey: 'teacherId', as: 'teacher' });
@@ -72,15 +60,6 @@ TeacherStudent.belongsTo(User, { foreignKey: 'teacherId', as: 'teacher' });
 // PaymentRecord ↔ Student (плательщик) / User (учитель-получатель)
 PaymentRecord.belongsTo(Student, { foreignKey: 'studentId', as: 'student' });
 PaymentRecord.belongsTo(User, { foreignKey: 'teacherId', as: 'teacher' });
-
-// Post ↔ User (автор поста)
-Post.belongsTo(User, { foreignKey: 'authorId', as: 'author' });
-User.hasMany(Post, { foreignKey: 'authorId', as: 'posts' });
-
-// PostLike ↔ Post / User
-PostLike.belongsTo(Post, { foreignKey: 'postId', onDelete: 'CASCADE' });
-Post.hasMany(PostLike, { foreignKey: 'postId', onDelete: 'CASCADE' });
-PostLike.belongsTo(User, { foreignKey: 'userId', onDelete: 'CASCADE' });
 
 // Student ↔ User (owner = учитель-владелец; account = привязанный аккаунт, nullable).
 // studentId в 6 таблицах ссылается на Student.id (C1 фаза 4). Login-данные ученика — через account.
@@ -111,12 +90,8 @@ module.exports = {
   Homework,
   HomeworkSubmission,
   Attendance,
-  Follow,
-  LessonRequest,
   TeacherStudent,
   PaymentRecord,
-  Post,
-  PostLike,
   Student,
   Invitation,
   Quiz,

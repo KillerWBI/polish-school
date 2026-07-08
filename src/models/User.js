@@ -21,9 +21,15 @@ const User = sequelize.define('User', {
     allowNull: false,
   },
   role: {
-    type: DataTypes.ENUM('teacher', 'student'),
+    type: DataTypes.ENUM('teacher', 'student', 'admin'),
     allowNull: false,
     defaultValue: 'student',
+  },
+  // Деактивация аккаунта администратором
+  active: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: true,
   },
   // Тариф учителя (SaaS-подписка). Оплата подписки — позже, через платёжку.
   plan: {
