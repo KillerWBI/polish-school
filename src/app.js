@@ -10,15 +10,21 @@ const app = express();
 // Безопасные заголовки (CSP/HSTS/X-Frame и т.д.)
 app.use(helmet());
 
-// CORS — в production строго по CLIENT_URL, в dev принимаем любой localhost:*
-// (Vite автоматически переходит на 5174/5175/... если 5173 занят).
+// CORS — в production по списку CLIENT_URL (можно несколько через запятую),
+// в dev принимаем любой localhost:* (Vite прыгает на 5174/5175/... если 5173 занят).
+// Хвостовой слэш нормализуется с обеих сторон — частый источник «Не разрешено CORS».
 const isDev = process.env.NODE_ENV !== 'production';
+const stripSlash = (s) => (s || '').replace(/\/+$/, '');
+const allowedOrigins = (process.env.CLIENT_URL || '')
+  .split(',')
+  .map((s) => stripSlash(s.trim()))
+  .filter(Boolean);
 app.use(cors({
   origin: (origin, cb) => {
     // Запросы без origin (Postman, curl, server-to-server) — разрешаем
     if (!origin) return cb(null, true);
     if (isDev && /^http:\/\/localhost:\d+$/.test(origin)) return cb(null, true);
-    if (origin === process.env.CLIENT_URL) return cb(null, true);
+    if (allowedOrigins.includes(stripSlash(origin))) return cb(null, true);
     cb(new Error('Не разрешено CORS-политикой'));
   },
   credentials: true,
