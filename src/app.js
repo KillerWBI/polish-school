@@ -25,7 +25,9 @@ app.use(cors({
     if (!origin) return cb(null, true);
     if (isDev && /^http:\/\/localhost:\d+$/.test(origin)) return cb(null, true);
     if (allowedOrigins.includes(stripSlash(origin))) return cb(null, true);
-    cb(new Error('Не разрешено CORS-политикой'));
+    // Чужой origin (боты/сканеры публичного API): не бросаем Error (иначе Sentry спамит
+    // логи на каждый запрос) — просто не отдаём CORS-заголовки, браузер сам заблокирует.
+    cb(null, false);
   },
   credentials: true,
 }));
