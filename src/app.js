@@ -7,6 +7,11 @@ require('dotenv').config();
 
 const app = express();
 
+// За обратным прокси (Railway/Vercel) доверяем ПЕРВОМУ хопу — чтобы express-rate-limit
+// видел реальный IP клиента из X-Forwarded-For (иначе ValidationError на каждый запрос).
+// Только первый хоп (не `true`), чтобы клиент не мог подделать IP и обойти лимиты.
+if (process.env.NODE_ENV === 'production') app.set('trust proxy', 1);
+
 // Безопасные заголовки (CSP/HSTS/X-Frame и т.д.)
 app.use(helmet());
 
