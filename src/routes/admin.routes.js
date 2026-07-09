@@ -10,5 +10,6 @@ router.get('/users',                    auth, isAdmin, ctrl.getUsers);
 router.patch('/users/:id/deactivate',   auth, isAdmin, ctrl.deactivateUser);
 router.patch('/users/:id/activate',     auth, isAdmin, ctrl.activateUser);
 router.patch('/users/:id/plan',         auth, isAdmin, ctrl.setUserPlan);
+router.patch('/users/:id/role',         auth, isAdmin, ctrl.setUserRole);
 
 module.exports = router;
