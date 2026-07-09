@@ -109,6 +109,28 @@ const activateUser = async (req, res) => {
   }
 };
 
+// PATCH /admin/users/:id/role — изменить роль пользователя (включая повышение в admin)
+const setUserRole = async (req, res) => {
+  try {
+    const { role } = req.body;
+    if (!['teacher', 'student', 'admin'].includes(role)) {
+      return res.status(400).json({ error: 'Допустимые роли: teacher, student, admin' });
+    }
+    // Нельзя понизить самого себя — защита от случайного самоудаления прав
+    if (req.params.id === req.user.id && role !== 'admin') {
+      return res.status(400).json({ error: 'Нельзя снять с себя роль admin' });
+    }
+    const user = await User.findByPk(req.params.id, { attributes: ['id', 'role'] });
+    if (!user) return res.status(404).json({ error: 'Пользователь не найден' });
+
+    await user.update({ role });
+    res.json({ data: { id: user.id, role } });
+  } catch (e) {
+    console.error('admin.setUserRole:', e);
+    res.status(500).json({ error: 'Ошибка изменения роли' });
+  }
+};
+
 // PATCH /admin/users/:id/plan — изменить тариф учителя
 const setUserPlan = async (req, res) => {
   try {
@@ -128,4 +150,4 @@ const setUserPlan = async (req, res) => {
   }
 };
 
-module.exports = { getStats, getTeachers, getUsers, deactivateUser, activateUser, setUserPlan };
+module.exports = { getStats, getTeachers, getUsers, deactivateUser, activateUser, setUserPlan, setUserRole };
