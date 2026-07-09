@@ -23,15 +23,22 @@ const PORT = process.env.PORT || 5000;
 async function bootstrapAdmin() {
   const adminEmail = process.env.ADMIN_EMAIL;
   if (!adminEmail) return;
-  const { User } = require('./src/models');
-  const user = await User.findOne({ where: { email: adminEmail.toLowerCase().trim() } });
-  if (!user) {
-    console.warn(`⚠️  ADMIN_EMAIL задан (${adminEmail}), но пользователь не найден`);
-    return;
-  }
-  if (user.role !== 'admin') {
-    await user.update({ role: 'admin' });
-    console.log(`✅ Пользователь ${adminEmail} повышен до admin`);
+  try {
+    const { User } = require('./src/models');
+    const user = await User.findOne({ where: { email: adminEmail.toLowerCase().trim() } });
+    if (!user) {
+      console.warn(`⚠️  ADMIN_EMAIL задан (${adminEmail}), но пользователь не найден`);
+      return;
+    }
+    if (user.role !== 'admin') {
+      await user.update({ role: 'admin' });
+      console.log(`✅ Пользователь ${adminEmail} повышен до admin`);
+    }
+  } catch (e) {
+    // Чаще всего — миграция 20260709000002 ещё не применена (нет ENUM admin).
+    // Запусти: npm run db:migrate
+    console.warn(`⚠️  bootstrapAdmin не выполнен: ${e.message}`);
+    console.warn('   Возможная причина: не применена миграция 20260709000002. Запусти: npm run db:migrate');
   }
 }
 
