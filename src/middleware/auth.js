@@ -3,13 +3,16 @@ const { User } = require('../models');
 
 // Проверяет JWT и убеждается, что аккаунт не деактивирован администратором.
 // Добавляет req.user = { id, role }
+// Читает токен из httpOnly-cookie access_token (приоритет) или Bearer-заголовка (fallback).
 const auth = async (req, res, next) => {
+  const cookieToken = req.cookies?.access_token;
   const header = req.headers.authorization;
-  if (!header || !header.startsWith('Bearer ')) {
+
+  if (!cookieToken && (!header || !header.startsWith('Bearer '))) {
     return res.status(401).json({ error: 'Токен не предоставлен' });
   }
 
-  const token = header.slice(7);
+  const token = cookieToken || header.slice(7);
   let payload;
   try {
     payload = jwt.verify(token, process.env.JWT_SECRET);

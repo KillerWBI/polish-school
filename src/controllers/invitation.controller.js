@@ -1,5 +1,6 @@
 const { Invitation, Group, User, Student, GroupStudent, TeacherStudent } = require('../models');
 const { resolveStudent } = require('../utils/students');
+const { createNotification } = require('../utils/notify');
 
 const USER_BRIEF = ['id', 'name', 'username', 'avatar'];
 
@@ -45,6 +46,15 @@ const create = async (req, res) => {
       inviteeUserId,
       status: 'pending',
     });
+
+    // Уведомляем приглашённого ученика (fire-and-forget)
+    createNotification(inviteeUserId, {
+      type: 'invitation_received',
+      title: 'Приглашение в группу',
+      body: `«${group.name}»`,
+      link: '/groups',
+    });
+
     res.status(201).json({ data: invitation });
   } catch (err) {
     console.error(err);

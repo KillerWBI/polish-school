@@ -246,4 +246,39 @@ const sendHomeworkReminderEmail = async (to, studentName, { description, deadlin
   return result.data;
 };
 
-module.exports = { sendVerificationEmail, sendPasswordResetEmail, sendLessonRequestEmail, sendLessonReminderEmail, sendHomeworkReminderEmail };
+// Ответ поддержки на обращение пользователя (best-effort — вызывающий с .catch()).
+const sendSupportReplyEmail = async (to, name, { subject, reply }) => {
+  if (!resend) {
+    console.log('\n┌─────────────────────────────────────────────────────────────────');
+    console.log('│ 📧 EMAIL DEV MODE — ответ поддержки (RESEND_API_KEY не задан)');
+    console.log(`│ Кому: ${to} (${name})`);
+    console.log(`│ Тема обращения: ${subject}`);
+    console.log('│ Ответ:');
+    console.log(`│ ${reply}`);
+    console.log('└─────────────────────────────────────────────────────────────────\n');
+    return { id: 'dev-mode', dev: true };
+  }
+
+  const result = await resend.emails.send({
+    from: FROM,
+    to,
+    subject: `Ответ на ваше обращение: ${subject} — LinguaFlow`,
+    html: `
+<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif; max-width:520px; margin:0 auto; padding:24px;">
+  <h2 style="color:#0F172A;">Ответ службы поддержки</h2>
+  <p style="color:#475569; font-size:15px; line-height:1.6;">
+    Здравствуйте, ${name}!<br/>
+    Вы обращались к нам по теме «<b>${subject}</b>». Наш ответ:
+  </p>
+  <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:16px; margin:16px 0; color:#0F172A; font-size:15px; line-height:1.6; white-space:pre-wrap;">${reply}</div>
+  <p style="color:#94a3b8; font-size:12px; margin-top:16px;">
+    Если вопрос не решён — просто ответьте на это письмо.
+  </p>
+</div>`,
+  });
+
+  if (result.error) throw new Error(`Resend: ${result.error.message}`);
+  return result.data;
+};
+
+module.exports = { sendVerificationEmail, sendPasswordResetEmail, sendLessonRequestEmail, sendLessonReminderEmail, sendHomeworkReminderEmail, sendSupportReplyEmail };

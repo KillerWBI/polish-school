@@ -1,13 +1,21 @@
 # Роли пользователей
 
-> ⚠️ **Частично устарело (актуал — [REVISION.md](../../REVISION.md)).** (1) Регистрация учителя **открытая**, без `teacherSecret` (он удалён). (2) После разворота teacher-first «ученик» в данных — это запись **`Student`** (заглушка без аккаунта ИЛИ реальный с `userId`), а не просто `User` с ролью `student`; `studentId` везде = `Student.id`. Модель ученика — REVISION.md §2.1/§5.
+**Обновлено 2026-07-09.** Добавлена роль `admin`. `teacherSecret` удалён (открытая регистрация). «Ученик» в данных — запись `Student` (заглушка/реальный), модель — REVISION.md §2.1/§5.
 
 ## Роли в системе
 
 | Роль | Значение | Создаётся |
 |------|----------|-----------|
-| `teacher` | Учитель — полный доступ | `POST /auth/register-teacher` (открытая регистрация, без `teacherSecret`) |
-| `student` | Студент | `POST /auth/register` (открытая регистрация) |
+| `teacher` | Учитель — workspace: группы, уроки, ДЗ, посещаемость, финансы | `POST /auth/register-teacher` (открытая, без секрета) |
+| `student` | Студент — своё расписание, ДЗ, оценки, долг | `POST /auth/register` (открытая) |
+| `admin` | Администратор — управление всей платформой | Первый: `ADMIN_EMAIL` в env → bootstrap при старте сервера. Следующие: через `/admin` → «Действия» → «Сменить роль» → Admin |
+
+### Как работает admin
+- `isAdmin` middleware — `role !== 'admin'` → 403; монтируется на `/api/v1/admin/*`
+- `isTeacher` пропускает admins (admin может смотреть teacher-только эндпоинты)
+- `auth.js` проверяет `user.active` в БД на каждый запрос → деактивация мгновенная
+- Нельзя деактивировать другого admin; нельзя понизить самого себя из admin
+- AdminPage.jsx доступна только `role=admin` через `RoleRoute`
 
 ---
 
@@ -130,24 +138,39 @@
 | GET /attendance | ✅ все | ✅ только свою |
 | POST /attendance | ✅ | ❌ |
 | PUT /attendance/:id | ✅ | ❌ |
-| GET /payments | ✅ все | ✅ только свои |
-| POST /payments/calculate | ✅ | ❌ |
-| PUT /payments/:id | ✅ | ❌ |
+| GET /payments/debts | ✅ (свои ученики) | ❌ |
+| GET /payments/debt | ❌ | ✅ (свои учителя) |
+| POST /payments/record | ✅ | ❌ |
+| GET /payments/history | ✅ | ❌ |
+| GET /admin/stats | ❌ | ❌ | только admin |
+| GET /admin/users | ❌ | ❌ | только admin |
+| GET /admin/teachers | ❌ | ❌ | только admin |
+| PATCH /admin/users/:id/role | ❌ | ❌ | только admin |
+| PATCH /admin/users/:id/plan | ❌ | ❌ | только admin |
+| PATCH /admin/users/:id/deactivate | ❌ | ❌ | только admin |
+| PATCH /admin/users/:id/activate | ❌ | ❌ | только admin |
 
 ---
 
+## Как создать первого admin
+
+1. Зарегистрировать обычный аккаунт (учитель или студент)
+2. Задать `ADMIN_EMAIL=email@example.com` в `.env` Railway/локально
+3. Перезапустить сервер — bootstrap автоматически повысит этого пользователя до admin
+4. Войти в аккаунт — в сайдбаре появится «Администрирование» → `/admin`
+
+Следующих adminов создавать через `/admin` → «Пользователи» → «Действия» → «Сменить роль» → Admin.
+
 ## Как создать учителя
 
-Через Postman — `POST /api/v1/auth/register-teacher`:
+Открытая регистрация без секрета через `POST /auth/register-teacher`:
 
 ```json
 {
   "name": "Имя Учителя",
   "email": "teacher@school.com",
-  "password": "пароль",
-  "teacherSecret": "<значение TEACHER_SECRET из .env>"
+  "password": "пароль"
 }
 ```
 
-`teacherSecret` должен совпадать с переменной `TEACHER_SECRET` в файле `.env`.  
-Возвращает `{ data: { token, user } }` — токен сразу готов к использованию.
+Возвращает `{ data: { token, user } }` — токен сразу готов к использованию. `TEACHER_SECRET` удалён.

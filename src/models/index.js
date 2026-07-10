@@ -12,6 +12,11 @@ const PaymentRecord = require('./PaymentRecord');
 const Student = require('./Student');
 const Invitation = require('./Invitation');
 const Quiz = require('./Quiz');
+const SupportTicket = require('./SupportTicket');
+const VocabItem = require('./VocabItem');
+const StudentLessonLog = require('./StudentLessonLog');
+const StudentNote = require('./StudentNote');
+const Notification = require('./Notification');
 
 // Group ↔ User (teacher)
 Group.belongsTo(User, { foreignKey: 'teacherId', as: 'teacher' });
@@ -80,6 +85,23 @@ User.hasMany(Quiz, { foreignKey: 'teacherId', as: 'quizzes' });
 // Homework ↔ Quiz (прикреплённый тест)
 Homework.belongsTo(Quiz, { foreignKey: 'quizId', as: 'quiz' });
 
+// SupportTicket ↔ User (автор, nullable — форма публичная)
+SupportTicket.belongsTo(User, { foreignKey: 'userId', as: 'author' });
+
+// VocabItem ↔ User (владелец — ученик)
+VocabItem.belongsTo(User, { foreignKey: 'userId', as: 'owner' });
+
+// StudentLessonLog ↔ User (владелец — ученик, ведёт личный журнал внешних занятий)
+StudentLessonLog.belongsTo(User, { foreignKey: 'userId', as: 'owner' });
+
+// StudentNote ↔ User / Lesson / IndividualLesson (личные заметки ученика)
+StudentNote.belongsTo(User, { foreignKey: 'userId', as: 'owner' });
+StudentNote.belongsTo(Lesson, { foreignKey: 'lessonId' });
+StudentNote.belongsTo(IndividualLesson, { foreignKey: 'individualLessonId' });
+
+// Notification ↔ User (получатель)
+Notification.belongsTo(User, { foreignKey: 'userId', as: 'recipient' });
+
 module.exports = {
   User,
   Group,
@@ -95,4 +117,9 @@ module.exports = {
   Student,
   Invitation,
   Quiz,
+  SupportTicket,
+  VocabItem,
+  StudentLessonLog,
+  StudentNote,
+  Notification,
 };

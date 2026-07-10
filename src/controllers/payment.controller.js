@@ -1,6 +1,7 @@
 const { Op } = require('sequelize');
 const { PaymentRecord, Attendance, Lesson, IndividualLesson, Group, User, Student } = require('../models');
 const { getStudentIdsForUser, getTeacherStudentIds } = require('../utils/students');
+const { createNotification } = require('../utils/notify');
 
 // getTeacherStudentIds — все Student.id учителя из таблицы Student (utils/students.js).
 // Раньше тут был локальный вариант через GroupStudent+IndividualCourse — он терял учеников
@@ -133,6 +134,17 @@ const recordPayment = async (req, res) => {
     const record = await PaymentRecord.create({
       studentId, teacherId, amount, method: method || 'cash', source: 'manual',
     });
+
+    // Уведомляем ученика, что учитель зафиксировал оплату (fire-and-forget)
+    if (student.userId) {
+      createNotification(student.userId, {
+        type: 'payment_recorded',
+        title: 'Оплата зафиксирована',
+        body: `Внесено ${Math.round(Number(amount))} zł`,
+        link: '/payments',
+      });
+    }
+
     res.status(201).json({ data: record });
   } catch (err) {
     console.error(err);
@@ -191,19 +203,96 @@ const getPaymentHistory = async (req, res) => {
   }
 };
 
+// GET /payments/my-history — ученик видит свою историю оплат (по всем учителям)
+// Ответ: { data: [{ id, amount, method, source, paidAt, teacher }], summary: { total, byMethod } }
+const getMyPaymentHistory = async (req, res) => {
+  try {
+    const myStudentIds = await getStudentIdsForUser(req.user.id);
+    if (!myStudentIds.length) return res.json({ data: [], summary: { total: 0, byMethod: {} } });
+
+    const { method, from, to } = req.query;
+    const where = { studentId: myStudentIds };
+    if (method) where.method = method;
+    if (from || to) {
+      where.paidAt = {};
+      if (from) where.paidAt[Op.gte] = new Date(from);
+      if (to) {
+        const end = new Date(to);
+        end.setHours(23, 59, 59, 999);
+        where.paidAt[Op.lte] = end;
+      }
+    }
+
+    const records = await PaymentRecord.findAll({
+      where,
+      order: [['paidAt', 'DESC']],
+      include: [{ model: User, as: 'teacher', attributes: ['id', 'name'] }],
+    });
+
+    const byMethod = {};
+    let total = 0;
+    for (const r of records) {
+      const amt = parseFloat(r.amount) || 0;
+      total += amt;
+      byMethod[r.method] = (byMethod[r.method] ?? 0) + amt;
+    }
+
+    const data = records.map((r) => ({
+      id: r.id,
+      amount: parseFloat(r.amount) || 0,
+      method: r.method,
+      source: r.source,
+      paidAt: r.paidAt,
+      teacher: r.teacher ? { id: r.teacher.id, name: r.teacher.name } : null,
+    }));
+
+    res.json({ data, summary: { total, byMethod } });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Ошибка получения истории оплат' });
+  }
+};
+
 // GET /payments/debt — студент видит долг по каждому учителю
 const getDebt = async (req, res) => {
   try {
-    // У пользователя может быть несколько Student-записей (по одной на учителя) — агрегируем по всем
     const myStudentIds = await getStudentIdsForUser(req.user.id);
+    if (!myStudentIds.length) return res.json({ data: [] });
+
+    // Три пакетных запроса вместо 3×N: по всем Student-записям пользователя сразу
+    const [groupAtt, indAtt, payRecords] = await Promise.all([
+      Attendance.findAll({
+        where: { studentId: myStudentIds, present: true },
+        attributes: ['studentId'],
+        include: [{
+          model: Lesson, required: true, attributes: ['id'],
+          include: [{ model: Group, required: true, attributes: ['teacherId', 'pricePerLesson'] }],
+        }],
+      }),
+      Attendance.findAll({
+        where: { studentId: myStudentIds, present: true },
+        attributes: ['studentId'],
+        include: [{ model: IndividualLesson, required: true, attributes: ['teacherId', 'pricePerLesson'] }],
+      }),
+      PaymentRecord.findAll({
+        where: { studentId: myStudentIds },
+        attributes: ['teacherId', 'amount'],
+      }),
+    ]);
 
     const charged = new Map(); // teacherId → начислено
     const paid = new Map();    // teacherId → оплачено
-    for (const sid of myStudentIds) {
-      const c = await computeChargedByTeacher(sid);
-      for (const [tid, amt] of c) charged.set(tid, (charged.get(tid) ?? 0) + amt);
-      const records = await PaymentRecord.findAll({ where: { studentId: sid }, attributes: ['teacherId', 'amount'] });
-      for (const r of records) paid.set(r.teacherId, (paid.get(r.teacherId) ?? 0) + parseFloat(r.amount));
+
+    for (const a of groupAtt) {
+      const { teacherId, pricePerLesson } = a.Lesson.Group;
+      charged.set(teacherId, (charged.get(teacherId) ?? 0) + (parseFloat(pricePerLesson) || 0));
+    }
+    for (const a of indAtt) {
+      const { teacherId, pricePerLesson } = a.IndividualLesson;
+      charged.set(teacherId, (charged.get(teacherId) ?? 0) + (parseFloat(pricePerLesson) || 0));
+    }
+    for (const r of payRecords) {
+      paid.set(r.teacherId, (paid.get(r.teacherId) ?? 0) + (parseFloat(r.amount) || 0));
     }
 
     // Объединяем все teacherId из обоих источников
@@ -308,4 +397,4 @@ const studentRecordPayment = async (req, res) => {
   }
 };
 
-module.exports = { computeChargedByTeacher, getDebt, recordPayment, getPaymentHistory, getDebtsForTeacher, getStudentDebtTotal, getTeacherDebtTotal, getTeacherPaymentInfo, studentRecordPayment };
+module.exports = { computeChargedByTeacher, getDebt, getMyPaymentHistory, recordPayment, getPaymentHistory, getDebtsForTeacher, getStudentDebtTotal, getTeacherDebtTotal, getTeacherPaymentInfo, studentRecordPayment };

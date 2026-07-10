@@ -2,6 +2,7 @@ const { Attendance, Lesson, Group, IndividualLesson, Student, User } = require('
 const { Op } = require('sequelize');
 const { isHwOwner } = require('../utils/ownership');
 const { getStudentIdsForUser, getTeacherStudentIds } = require('../utils/students');
+const { notifyMany } = require('../utils/notify');
 
 // ── Авто-подтверждение: если студент не ответил за 3 дня — засчитываем как учитель ──
 const autoConfirmExpired = async () => {
@@ -182,13 +183,6 @@ const getPending = async (req, res) => {
 const create = async (req, res) => {
   try {
     const { lessonId, individualLessonId, records } = req.body;
-    if (!records || !Array.isArray(records) || records.length === 0) {
-      return res.status(400).json({ error: 'records обязателен и не должен быть пустым' });
-    }
-    if (!lessonId && !individualLessonId) {
-      return res.status(400).json({ error: 'Нужен lessonId или individualLessonId' });
-    }
-
     if (!await isHwOwner({ lessonId, individualLessonId }, req.user.id)) {
       return res.status(403).json({ error: 'Доступ запрещён' });
     }
@@ -235,6 +229,21 @@ const create = async (req, res) => {
       return out;
     });
 
+    // Уведомляем реальных студентов (не заглушек), у кого запись ждёт подтверждения (fire-and-forget)
+    const pendingStudentIds = result
+      .filter(r => r.status === 'pending_student')
+      .map(r => r.studentId);
+    if (pendingStudentIds.length) {
+      Student.findAll({ where: { id: pendingStudentIds }, attributes: ['userId'] })
+        .then((rows) => notifyMany(rows.map(s => s.userId).filter(Boolean), {
+          type: 'attendance_pending',
+          title: 'Подтвердите посещение',
+          body: 'Учитель отметил вас на уроке',
+          link: '/attendance',
+        }))
+        .catch(() => {});
+    }
+
     res.status(201).json({ data: result });
   } catch (err) {
     console.error(err);
@@ -252,10 +261,6 @@ const confirmStudent = async (req, res) => {
     if (!myStudentIds.includes(record.studentId)) return res.status(403).json({ error: 'Доступ запрещён' });
 
     const { present } = req.body;
-    if (typeof present !== 'boolean') {
-      return res.status(400).json({ error: 'present обязателен (true/false)' });
-    }
-
     record.studentMarked = present;
 
     if (present === record.teacherMarked) {

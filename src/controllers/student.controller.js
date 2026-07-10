@@ -1,5 +1,7 @@
 const sequelize = require('../config/database');
-const { Student } = require('../models');
+const { QueryTypes } = require('sequelize');
+const { Student, VocabItem, StudentLessonLog } = require('../models');
+const { getStudentIdsForUser } = require('../utils/students');
 // FK = список 6 таблиц, где лежит ученик (см. studentFkRegistry.js). Каждый элемент —
 // объект { table:'Attendances', column:'studentId', uniqueWith:[...] }. Это и есть «где искать ученика».
 const FK = require('../utils/studentFkRegistry');
@@ -111,4 +113,92 @@ const remove = async (req, res) => {
   }
 };
 
-module.exports = { merge, remove };
+// GET /students/me/progress — прогресс-центр ученика:
+// streak (дней активности подряд), активность по дням (heatmap), словарь-статы, внешние занятия.
+// Активность = день, когда был на уроке / сдал ДЗ / трогал словарь / записал внешнее занятие.
+const getMyProgress = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const studentIds = await getStudentIdsForUser(userId);
+
+    // Собираем даты активности за последние 180 дней из 4 источников.
+    let activityRows = [];
+    if (studentIds.length) {
+      activityRows = await sequelize.query(`
+        SELECT day, COUNT(*)::int AS count FROM (
+          SELECT l.date AS day
+            FROM "Attendances" a JOIN "Lessons" l ON l.id = a."lessonId"
+            WHERE a."studentId" IN (:studentIds) AND a.present = true
+          UNION ALL
+          SELECT il.date AS day
+            FROM "Attendances" a JOIN "IndividualLessons" il ON il.id = a."individualLessonId"
+            WHERE a."studentId" IN (:studentIds) AND a.present = true
+          UNION ALL
+          SELECT (hs."createdAt")::date AS day
+            FROM "HomeworkSubmissions" hs WHERE hs."studentId" IN (:studentIds)
+          UNION ALL
+          SELECT (v."updatedAt")::date AS day
+            FROM "VocabItems" v WHERE v."userId" = :userId
+          UNION ALL
+          SELECT sl.date AS day
+            FROM "StudentLessonLogs" sl WHERE sl."userId" = :userId
+        ) src
+        WHERE day >= (NOW() - INTERVAL '180 days')::date
+        GROUP BY day ORDER BY day;
+      `, { type: QueryTypes.SELECT, replacements: { studentIds, userId } });
+    } else {
+      // Нет Student-записей (не привязан к учителю) — только личные источники
+      activityRows = await sequelize.query(`
+        SELECT day, COUNT(*)::int AS count FROM (
+          SELECT (v."updatedAt")::date AS day FROM "VocabItems" v WHERE v."userId" = :userId
+          UNION ALL
+          SELECT sl.date AS day FROM "StudentLessonLogs" sl WHERE sl."userId" = :userId
+        ) src
+        WHERE day >= (NOW() - INTERVAL '180 days')::date
+        GROUP BY day ORDER BY day;
+      `, { type: QueryTypes.SELECT, replacements: { userId } });
+    }
+
+    // Нормализуем ключи в 'YYYY-MM-DD'
+    const activeDays = new Set();
+    const activityByDay = activityRows.map((r) => {
+      const key = (r.day instanceof Date ? r.day.toISOString().slice(0, 10) : String(r.day).slice(0, 10));
+      activeDays.add(key);
+      return { date: key, count: r.count };
+    });
+
+    // Streak — сколько дней подряд активности заканчивая сегодня/вчера
+    const dayKey = (d) => d.toISOString().slice(0, 10);
+    let streak = 0;
+    const cursor = new Date();
+    // если сегодня активности нет — стрик может считаться от вчера
+    if (!activeDays.has(dayKey(cursor))) cursor.setDate(cursor.getDate() - 1);
+    while (activeDays.has(dayKey(cursor))) {
+      streak += 1;
+      cursor.setDate(cursor.getDate() - 1);
+    }
+
+    // Словарь-статы
+    const vocab = await VocabItem.findAll({ where: { userId }, attributes: ['status'] });
+    const vocabCounts = { new: 0, learning: 0, known: 0 };
+    for (const v of vocab) vocabCounts[v.status] = (vocabCounts[v.status] ?? 0) + 1;
+
+    // Внешние занятия — часы и число
+    const ext = await StudentLessonLog.findAll({ where: { userId }, attributes: ['durationMin'] });
+    const extMinutes = ext.reduce((s, r) => s + (r.durationMin || 0), 0);
+
+    res.json({
+      data: {
+        streak,
+        activityByDay,
+        vocab: { ...vocabCounts, total: vocab.length },
+        external: { lessons: ext.length, hours: Math.round(extMinutes / 6) / 10 },
+      },
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Ошибка получения прогресса' });
+  }
+};
+
+module.exports = { merge, remove, getMyProgress };

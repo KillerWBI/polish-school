@@ -96,6 +96,17 @@ const writeLimiter = rateLimit({
 app.use('/api/v1/payments/record',    writeLimiter);
 app.use('/api/v1/attendance/confirm', writeLimiter);
 
+// Защита от спама обращениями в поддержку (публичная форма, 3 / час на IP)
+const supportLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 3,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: skipInDev,
+  message: { error: 'Слишком много обращений. Попробуйте позже.' },
+});
+app.use('/api/v1/support/ticket', supportLimiter);
+
 // Мониторинг / health check
 app.get('/health', (req, res) => res.json({ status: 'ok', uptime: process.uptime() }));
 
@@ -127,6 +138,12 @@ app.use('/api/v1/students',           require('./routes/student.routes'));
 app.use('/api/v1/ai',                 require('./routes/ai.routes'));
 app.use('/api/v1/quizzes',            require('./routes/quiz.routes'));
 app.use('/api/v1/admin',              require('./routes/admin.routes'));
+app.use('/api/v1/support',            require('./routes/support.routes'));
+app.use('/api/v1/vocab',              require('./routes/vocab.routes'));
+app.use('/api/v1/my-lessons',         require('./routes/studentLessonLog.routes'));
+app.use('/api/v1/notes',              require('./routes/studentNote.routes'));
+app.use('/api/v1/materials',          require('./routes/materials.routes'));
+app.use('/api/v1/notifications',      require('./routes/notification.routes'));
 
 // Глобальный обработчик ошибок
 app.use((err, req, res, next) => {
