@@ -23,6 +23,8 @@ const signRefreshToken = (user) =>
 
 const isProd = process.env.NODE_ENV === 'production';
 const REFRESH_COOKIE = 'refreshToken';
+const ACCESS_COOKIE  = 'access_token';
+
 const refreshCookieOpts = {
   httpOnly: true,                        // JS на фронте не видит → защита от XSS-кражи
   secure:   isProd,                      // по HTTPS только в проде (в dev http)
@@ -31,9 +33,24 @@ const refreshCookieOpts = {
   maxAge:   30 * 24 * 60 * 60 * 1000,    // 30 дней
 };
 
+// Access-token cookie (httpOnly): JS не может его прочитать → XSS не получит токен.
+// Параллельно токен ещё возвращается в теле ответа для фронта (localStorage/in-memory).
+const accessCookieOpts = {
+  httpOnly: true,
+  secure:   isProd,
+  sameSite: isProd ? 'none' : 'lax',
+  path:     '/',                         // шлётся на все эндпоинты API
+  maxAge:   7 * 24 * 60 * 60 * 1000,    // 7 дней (соответствует JWT_EXPIRES_IN)
+};
+
 // Ставит refresh-cookie рядом с выдачей access — вызывается в login/register.
 const setRefreshCookie = (res, user) => {
   res.cookie(REFRESH_COOKIE, signRefreshToken(user), refreshCookieOpts);
+};
+
+// Ставит access-token httpOnly cookie (дополнительно к телу ответа).
+const setAccessCookie = (res, token) => {
+  res.cookie(ACCESS_COOKIE, token, accessCookieOpts);
 };
 
 // Генерирует токен подтверждения email (24ч TTL)
@@ -93,6 +110,7 @@ const register = async (req, res) => {
     const user  = await createUserWithVerification({ name, email, password, role: 'student' });
     const token = signToken(user);
     setRefreshCookie(res, user);
+    setAccessCookie(res, token);
     res.status(201).json({ data: { token, user: userResponse(user) } });
   } catch (err) {
     if (err.name === 'SequelizeUniqueConstraintError') {
@@ -118,6 +136,7 @@ const login = async (req, res) => {
 
     const token = signToken(user);
     setRefreshCookie(res, user);
+    setAccessCookie(res, token);
     res.json({ data: { token, user: userResponse(user) } });
   } catch (err) {
     console.error(err);
@@ -150,6 +169,7 @@ const refresh = async (req, res) => {
     const accessToken = signToken(user);
     // 4) продлеваем refresh-cookie (скользящее окно) — активный юзер не разлогинится через 30д
     setRefreshCookie(res, user);
+    setAccessCookie(res, accessToken);
 
     res.json({ data: { token: accessToken } });
   } catch (err) {
@@ -158,9 +178,10 @@ const refresh = async (req, res) => {
   }
 };
 
-// POST /auth/logout — гасит refresh-cookie (access протухнет сам).
+// POST /auth/logout — гасит refresh и access httpOnly-cookie.
 const logout = (req, res) => {
   res.clearCookie(REFRESH_COOKIE, { ...refreshCookieOpts, maxAge: undefined });
+  res.clearCookie(ACCESS_COOKIE,  { ...accessCookieOpts,  maxAge: undefined });
   res.json({ data: { message: 'Выход выполнен' } });
 };
 
@@ -198,6 +219,7 @@ const registerTeacher = async (req, res) => {
     const user  = await createUserWithVerification({ name, email, password, role: 'teacher' });
     const token = signToken(user);
     setRefreshCookie(res, user);
+    setAccessCookie(res, token);
     res.status(201).json({ data: { token, user: userResponse(user) } });
   } catch (err) {
     if (err.name === 'SequelizeUniqueConstraintError') {

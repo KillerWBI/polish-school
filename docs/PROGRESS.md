@@ -40,6 +40,8 @@
 | Attendance | ✅ | Dual confirmation: `pending_student → confirmed/disputed`. Авто-confirm через 3 дня. Migration `20260609000001` нужна на сервере (`npm run db:migrate`). Полное описание → [ATTENDANCE-CONFIRMATION.md](ATTENDANCE-CONFIRMATION.md) |
 | Payments | ✅ | **Переписан на live-долг (2026-06-22):** помесячная `Payment` удалена; долг = посещения (`charged`) − `PaymentRecord` (`paid`). Эндпоинты: `GET /payments/debt` (студент), `GET /payments/debts` (учитель), `POST /payments/record`. N+1 в долге по ученикам остаётся (цикл) — оптимизация позже. **2026-07-06:** `PaymentRecord` получил `method` (cash/card/transfer/online) + `source` (manual/online), миграция `20260707000001`; `record` принимает `method` (source='manual'); новый `GET /payments/history` (фильтры studentId/method/from/to + сводка byMethod) |
 | Invitations | ✅ (бэк) | C3 механика B (2026-06-28): приглашение учитель→ученик в группу. `GET /users/search`, `POST /groups/:id/invitations`, `GET /invitations`, `PATCH /invitations/:id`. Гейт `TeacherStudent` параллельно. Фронт Ф5–Ф6 в работе |
+| Support | ✅ 2026-07-10 | Обращения в поддержку. Модель `SupportTicket` + миграция `20260710000001`. `POST /support/ticket` (публичный, `optionalAuth`, rate-limit 3/час), `GET /admin/support` (+counts), `PATCH /admin/support/:id` (ответ → `sendSupportReplyEmail` best-effort + статус). Zod `support.schema`. Новый middleware `optionalAuth` (мягкая авторизация публичных форм). |
+| Payments (доп.) | ✅ 2026-07-10 | `GET /payments/my-history` — история оплат ученика (по всем учителям), scope через `getStudentIdsForUser`, include teacher. Показывает КОМУ платил (в отличие от учительской `/history`). |
 
 ---
 
@@ -100,9 +102,9 @@
 - [x] User.js: `role: ENUM('teacher','student','admin')` + `active: BOOLEAN DEFAULT true`
 - [x] `isAdmin` в `role.js`; `isTeacher` теперь пропускает admins
 - [x] `auth.js` async — проверяет `active` в БД на каждый запрос (деактивация немедленная)
-- [x] `admin.controller.js`: `getStats`, `getTeachers`, `getUsers`, `deactivateUser`, `activateUser`, `setUserPlan`
+- [x] `admin.controller.js`: `getStats`, `getTeachers`, `getUsers`, `deactivateUser`, `activateUser`, `setUserPlan`, `setUserRole` (смена роли включая admin; защита от само-понижения)
 - [x] `admin.routes.js` → `/api/v1/admin` (все за `auth+isAdmin`)
-- [x] `ADMIN_EMAIL` bootstrap в `index.js`: при старте повышает пользователя с этим email до admin
+- [x] `ADMIN_EMAIL` bootstrap в `index.js`: при старте повышает пользователя с этим email до admin (try/catch — не роняет сервер если миграция не применена)
 
 ### 🟢 Архитектура: слой валидации Zod
 - [x] **`src/middleware/validate.js`** — ✅ 2026-05-31, `validate(schema, source)` → safeParse → 400 или `req[source]=data`
@@ -110,7 +112,7 @@
 - [x] **`payment`** — ✅ TASK-3 (2026-06-04): `calculatePaymentSchema` (month + refine), `updatePaymentSchema`, `paginationQuery`. Порядок middleware `auth, isTeacher, validate`. **Урок Express 5:** `req.query` — getter, `validate` для query пишет в `req.validatedQuery`
 - [x] **`group` + `lesson`** — ✅ TASK-4 (2026-06-04): `group.schema.js` (create/update/addStudent + scheduleSlot), `lesson.schema.js` (create/update). Подключены, контроллеры очищены
 - [x] **`auth`** — ✅ TASK-5 (2026-06-12): `auth.schema.js` (register/login/changePassword). Email нормализуется схемой (`trim→toLowerCase→.pipe(z.email())` — pipe, чтобы формат проверялся ПОСЛЕ нормализации). Сетевые проверки (`validateEmail` MX/disposable) и уникальность (`User.findOne`) остались в контроллере
-- [ ] Раскатать на остальные модули (user, individualCourse, individualLesson, attendance) → [TASKS.md](../../TASKS.md) секция «Бэклог» (B1/B2, техдолг)
+- [x] **user, attendance, individualCourse, individualLesson** — ✅ 2026-07-09 (T-1): схемы + роуты + очистка контроллеров. Все модули покрыты Zod.
 
 ### ⚪ Низкий приоритет
 - [x] N+1 в `payment.calculate` (групповая часть) — ✅ TASK-7 (2026-06-08), один findAll с include вместо циклов
@@ -120,9 +122,9 @@
 - [ ] N+1 в `payment.calculate` (индивидуальная часть) — цикл `Attendance.findOne` на каждый урок ещё остаётся
 - [ ] Очистить `buildDateWhere` в `lesson.controller.js`
 - [ ] `GET /payments/debt/:studentId`
-- [ ] Refresh token
+- [x] Refresh token — ✅ 2026-07-01 (access 1h httpOnly + refresh cookie 30д, скользящее окно, `/auth/refresh` + `/auth/logout`)
 - [ ] Экспорт PDF/Excel
-- [ ] Email-напоминания (Resend): за 24ч до урока и дедлайна ДЗ
+- [ ] Email-напоминания (Resend): за 24ч до урока и дедлайна ДЗ (node-cron)
 
 ---
 
@@ -130,6 +132,15 @@
 
 | Дата | Что сделано |
 |------|------------|
+| 2026-07-10 | **Фаза 8 — in-app уведомления.** Модель `Notification` (userId, type, title, body?, link?, readAt?) + миграция `20260710000005` (+индекс userId,readAt). Хелпер `utils/notify.js` (`createNotification`/`notifyMany`, best-effort). Контроллер: `list` (?unread + meta.unreadCount), `markRead`, `markAllRead`. Интеграция в события: `homework.create`→студентам группы (`resolveHwRecipients`), `gradeSubmission`→ученику, `attendance.create`→студентам с pending, `invitation.create`→приглашённому, `payment.recordPayment`→ученику. Все fire-and-forget. `/api/v1/notifications`. Email-канал отложен (нужен домен). |
+| 2026-07-10 | **Фаза 7 — материалы урока.** `GET /materials` (обе роли, role-switch): teacher — уроки своих групп + инд.уроки с непустыми `materials`; student — уроки его групп (через GroupStudent) + его инд.уроки. Include Group.name, сортировка по дате DESC. `materials` JSONB `[{type,url?,content?,title?}]` уже был на Lesson/IndividualLesson. `/api/v1/materials`. |
+| 2026-07-10 | **Фаза 6 — прогресс-центр ученика.** `GET /students/me/progress` (isStudent) — streak (дней активности подряд), activityByDay (heatmap, 180 дней, из посещений/ДЗ/словаря/внешних занятий через UNION ALL SQL), vocab-counts, external (занятий/часов). Переиспользует `getStudentIdsForUser`. |
+| 2026-07-10 | **Фаза 5 — заметки ученика.** Модель `StudentNote` (userId, lessonId?, individualLessonId?, title?, text) + миграция `20260710000004` + Zod. CRUD `GET/POST/PUT/DELETE /notes` (student-scoped, фильтр lessonId/individualLessonId). Личный блокнот-конспект. `/api/v1/notes`. |
+| 2026-07-10 | **Фаза 4 — трекер внешних занятий.** Модель `StudentLessonLog` (userId, teacherLabel строка-не-FK, subject, date, time?, durationMin?, topic?, notes?, pricePerLesson, isPaid+paidAt, type(external/self_study)) + миграция `20260710000003` (+индекс userId,date). Контроллер: `list` (фильтр type/subject/from/to), `stats` (занятий/часов/долг/оплачено + разбивки bySubject/byTeacher), `create` (isPaid→paidAt), `update`, `markPaid`, `remove`. Изолирован от Lesson/Teacher — учёт занятий вне платформы. Роуты за `isStudent`. `/api/v1/my-lessons`. |
+| 2026-07-10 | **Фаза 3 — личный словарь (SR).** Модель `VocabItem` (userId, word, translation, example?, status(new/learning/known), correctStreak, nextReviewAt) + миграция `20260710000002` (+индекс userId,nextReviewAt) + Zod `vocab.schema`. Контроллер `vocab.controller`: `list` (фильтр status + counts), `due` (nextReviewAt<=now, кроме known), `create` (nextReviewAt=now), `update`, `review` (SR: correct→nextReviewAt=now+2^streak дней, streak++, ≥5→known; wrong→+1ч, streak=0, learning), `remove`. Всё student-scoped, роуты за `isStudent`. `/api/v1/vocab`. |
+| 2026-07-10 | **Фаза 2 — Support (заявки/проблемы).** Модель `SupportTicket` (userId nullable, name/email/subject/category/message/status/adminReply/repliedAt) + миграция `20260710000001` + Zod `support.schema`. Публичный `POST /support/ticket` (middleware `optionalAuth` — привязывает userId если залогинен, но не требует входа; rate-limit `supportLimiter` 3/час). Admin: `GET /admin/support` (фильтр status/category + meta.counts по статусам), `PATCH /admin/support/:id` (ответ → `sendSupportReplyEmail` best-effort с `.catch`, статус; adminReply без status → resolved). `email.js`: добавлен `sendSupportReplyEmail`. Смонтирован `/api/v1/support`. |
+| 2026-07-10 | **Фаза 1 — история оплат ученика.** `GET /payments/my-history` (student) — по образцу учительской `/history`, но scope через `getStudentIdsForUser(req.user.id)`, include `User as:'teacher'`. Ответ `{ data:[{id,amount,method,source,paidAt,teacher}], summary:{total,byMethod} }`. Показывает КОМУ платил ученик. |
+| 2026-07-10 | **Фронт: code splitting + Sentry lazy.** (1) Все 18 страниц приложения (кроме Landing/Auth/Dashboard) переведены на `React.lazy()` → FullCalendar (69KB gzip), AttendancePage, HomeworkPage и др. не грузятся при старте. Suspense в AppLayout вокруг Outlet. (2) `utils/sentry.js` — динамический импорт `@sentry/react` только при наличии `VITE_SENTRY_DSN`; `main.jsx` + `ErrorBoundary.jsx` переведены. `@sentry/react` (~50KB) вне main bundle без DSN. `vite build` ✅. |
 | 2026-07-09 | **Sprint 1 — 5 bug-fixes (ревью 2026-07-08).** (1) **N+1 `getTeacherDebtTotal`** — цикл `for...of` с 3 SQL на ученика заменён тремя пакетными запросами `Attendance.findAll IN [studentIds]` + `PaymentRecord.findAll IN [studentIds]`, суммирование в JS (аналогично `getDebtsForTeacher`). (2) **`ungradedList` dashboard** — добавлен `subQuery: false` в `HomeworkSubmission.findAll` с `limit:5` + `include` (Sequelize без флага оборачивает LIMIT в подзапрос, что ломает JOIN). Остальные 3 фикса — на фронте. |
 | 2026-07-08 | **Прод-фиксы деплоя (инцидент при мёрдже в main).** (1) **`trust proxy`:** `app.set('trust proxy', 1)` в проде — Railway за прокси (X-Forwarded-For) ронял `express-rate-limit` (`ERR_ERL_UNEXPECTED_X_FORWARDED_FOR`) → ломался логин/регистрация. (2) **CORS устойчивее:** `CLIENT_URL` — список origin через запятую + нормализация хвостового `/`; чужой origin (боты) → `cb(null,false)` вместо `throw` (не спамит Sentry). Причина «блока» была не в коде, а в `CLIENT_URL` ≠ адрес фронта (git-preview Vercel ≠ прод-URL). |
 | 2026-07-05 | **Готовность к запуску — блокеры (dev-ветка).** (1) **Автотесты:** Vitest+supertest, отдельная тест-БД `polish_test` (Railway), `config/database.js` под `NODE_ENV=test`→`TEST_DATABASE_URL`, guard в `tests/setup.js` (только `*polish_test*`, `sync({force})`); 16 тестов: изоляция арендаторов (attendance/payments/user.update), расчёт долга, сброс пароля, ростер. (2) **CI:** `.github/workflows/ci.yml` — Postgres-сервис + `npm test`. (3) **Sentry:** `instrument.js` (init только при `SENTRY_DSN`, PII-скраб, перехват `console.error`→captureException), подключён первой строкой в `index.js`. (4) **Восстановление пароля:** поля User `passwordResetToken/ExpiresAt` + идемпотентная миграция `20260705000001` (применена), `sendPasswordResetEmail`, `POST /auth/forgot-password` (всегда 200) + `/reset-password` (TTL 1ч), Zod + rate-limit. (5) **Секреты:** `.env.example`; JWT-секреты сменены (утекли в public history — Cloudinary/Resend/DB ротировать вручную). (6) **Демо:** `seed-demo.js --clean` (удаление демо перед запуском). (7) **`getMyStudents` → модель `Student`** (реальные + заглушки, `id`=Student.id, `isPlaceholder`); `addStudent` и `individualLesson.create` принимают Student.id из ростера (заглушки видны в «Мои ученики» и пикере инд.урока). |

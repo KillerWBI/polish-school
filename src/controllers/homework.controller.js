@@ -3,6 +3,7 @@ const { Op } = require('sequelize');
 const { isHwOwner } = require('../utils/ownership');
 const { getStudentIdsForUser } = require('../utils/students');
 const { isAllowedUploadUrl } = require('../utils/cloudinary');
+const { notifyMany, createNotification } = require('../utils/notify');
 
 
 
@@ -58,6 +59,25 @@ const resolveAccessStudentId = async (hw, studentIds) => {
     return (il && studentIds.includes(il.studentId)) ? il.studentId : null;
   }
   return null;
+};
+
+// Собирает User.id студентов урока (для уведомлений о новом ДЗ).
+// Групповой урок → все участники группы; инд.урок → его студент. Заглушки (userId=null) отсеиваются.
+const resolveHwRecipients = async (lessonId, individualLessonId) => {
+  let studentRowIds = [];
+  if (lessonId) {
+    const lesson = await Lesson.findByPk(lessonId, { attributes: ['groupId'] });
+    if (lesson) {
+      const members = await GroupStudent.findAll({ where: { groupId: lesson.groupId }, attributes: ['studentId'] });
+      studentRowIds = members.map(m => m.studentId);
+    }
+  } else if (individualLessonId) {
+    const il = await IndividualLesson.findByPk(individualLessonId, { attributes: ['studentId'] });
+    if (il) studentRowIds = [il.studentId];
+  }
+  if (!studentRowIds.length) return [];
+  const students = await Student.findAll({ where: { id: studentRowIds }, attributes: ['userId'] });
+  return students.map(s => s.userId).filter(Boolean);
 };
 
 // S1: и учитель, и студент видят ТОЛЬКО ДЗ своих уроков.
@@ -126,6 +146,17 @@ const create = async (req, res) => {
     }
 
     const hw = await Homework.create({ lessonId, individualLessonId, description, deadline, quizId: quizId || null });
+
+    // Уведомляем студентов о новом ДЗ (fire-and-forget, не блокирует ответ)
+    resolveHwRecipients(lessonId, individualLessonId).then((userIds) => {
+      notifyMany(userIds, {
+        type: 'homework_assigned',
+        title: 'Новое домашнее задание',
+        body: (description || '').slice(0, 120),
+        link: '/homework',
+      });
+    }).catch(() => {});
+
     res.status(201).json({ data: hw });
   } catch (err) {
     console.error(err);
@@ -257,6 +288,19 @@ const gradeSubmission = async (req, res) => {
     const { grade } = req.body;
     const isReset = grade === null || grade === undefined;
     await sub.update({ grade: isReset ? null : grade, status: isReset ? 'pending' : 'graded' });
+
+    // Уведомляем ученика о выставленной оценке (не при сбросе)
+    if (!isReset) {
+      Student.findByPk(sub.studentId, { attributes: ['userId'] }).then((st) => {
+        if (st?.userId) createNotification(st.userId, {
+          type: 'homework_graded',
+          title: 'Ваше ДЗ оценили',
+          body: `Оценка: ${grade}`,
+          link: '/homework',
+        });
+      }).catch(() => {});
+    }
+
     res.json({ data: sub });
   } catch (err) {
     console.error(err);

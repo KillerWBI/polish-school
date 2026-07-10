@@ -6,14 +6,21 @@
 
 ## 1. Auth ✅
 
-- `POST /auth/register` — email normalize, пароль ≥6, возвращает JWT
-- `POST /auth/register-teacher` — проверяет `teacherSecret` из `.env`
-- `POST /auth/login` — email normalize, bcrypt, rate limit 20/15мин, возвращает JWT
-- `GET /auth/me` — профиль текущего пользователя
+- `POST /auth/register` — email normalize (Zod), MX/disposable check, bcrypt, JWT; авто-генерация username
+- `POST /auth/register-teacher` — то же, role='teacher' (открытая, без teacherSecret)
+- `POST /auth/login` — bcrypt timing-safe, rate-limit 20/15мин, JWT access (1h) + refresh cookie (30д)
+- `GET /auth/me` — профиль текущего пользователя + username/avatar/plan/role
 - `PUT /auth/password` — смена пароля по `currentPassword`
+- `GET /auth/verify-email?token=` — подтверждение email (токен 24ч)
+- `POST /auth/resend-verification` — повторная отправка письма (rate-limit 10/15мин)
+- `POST /auth/forgot-password` — отправить ссылку сброса (всегда 200)
+- `POST /auth/reset-password` — новый пароль по токену (TTL 1ч)
+- `POST /auth/refresh` — обновить access-токен по httpOnly-cookie (скользящее окно 30д)
+- `POST /auth/logout` — сброс refresh-cookie
 
-**Что нет:** восстановление пароля, email-верификация, refresh token  
-**Файлы:** `auth.controller.js`, `auth.routes.js`, `User.js`, `middleware/auth.js`, `middleware/role.js`
+**Безопасность:** Zod `auth.schema.js` (register/login/changePassword); email `trim→toLowerCase→pipe(z.email())`; MX + disposable blacklist (`services/emailValidator.js`); timing-safe login (dummy bcrypt при несуществующем email); rate-limit на register (5/15мин) и verify/resend (10/15мин); `ADMIN_EMAIL` bootstrap в `index.js`.
+
+**Файлы:** `auth.controller.js`, `auth.routes.js`, `User.js`, `middleware/auth.js` (async, проверяет `active`), `middleware/role.js` (`isTeacher`, `isAdmin`), `schemas/auth.schema.js`, `services/emailValidator.js`
 
 ---
 
@@ -96,16 +103,25 @@
 
 ---
 
-## 9. Payments ✅
+## 9. Payments ✅ (live-debt модель, 2026-06-22)
 
-- `calculate`: групповые + индивидуальные уроки ✅
-- `findOrCreate` — не дублирует при повторном вызове ✅
-- `update` — ownership check через `GroupStudent → Group.teacherId` ✅
-- Include `student { id, name, email }` + сортировка `month DESC` ✅
-- Пагинация ✅
-- ⚠️ N+1 в `calculate` (цикл по студентам)
+Помесячная `Payment` удалена. Долг считается живьём.
 
-**Файлы:** `payment.controller.js`, `payment.routes.js`, `Payment.js`
+- **Начислено** = Σ(подтверждённые посещения × цена урока) — через `computeChargedByTeacher`
+- **Оплачено** = Σ(`PaymentRecord.amount`)
+- **Долг** = начислено − оплачено (кламп ≥0)
+
+Эндпоинты:
+- `GET /payments/debts` — учитель: долг по каждому ученику
+- `GET /payments/debt` — студент: долг по каждому учителю
+- `POST /payments/record` — внести оплату (`studentId`, `amount`, `method`: cash/card/transfer/online)
+- `GET /payments/history` — история оплат (фильтры studentId/method/from/to + сводка byMethod)
+
+**Оптимизации:** `fetchChargesAndPayments(studentIds, teacherId)` — хелпер 3 пакетных запроса через `Promise.all`; `getTeacherDebtTotal` и `getDebtsForTeacher` используют его (устранён N+1). `writeLimiter` (10/мин) на `POST /payments/record`.
+
+**Модель:** `PaymentRecord` (id, studentId→Student, teacherId→User, amount DECIMAL, method ENUM, source ENUM, paidAt DATE, screenshotUrl)
+
+**Файлы:** `payment.controller.js`, `payment.routes.js`, `PaymentRecord.js`, `utils/debtHelpers.js`
 
 ---
 
@@ -141,7 +157,27 @@
 
 ---
 
-## 10. Инфраструктура ✅
+## 10. Admin ✅ (2026-07-09)
+
+Все эндпоинты за `auth + isAdmin`. Middleware `isAdmin` — `role !== 'admin'` → 403. `isTeacher` пропускает admin.
+
+- `GET /admin/stats` — KPI: count(teachers/students/groups/lessons), sum(PaymentRecord.amount)
+- `GET /admin/teachers` — пагинированный список учителей (name, email, username, plan, active, emailVerified)
+- `GET /admin/users` — все пользователи с фильтром `?role=&active=`
+- `PATCH /admin/users/:id/deactivate` — `active=false` (нельзя деактивировать admin)
+- `PATCH /admin/users/:id/activate` — `active=true`
+- `PATCH /admin/users/:id/role` — смена роли (teacher/student/admin); нельзя понизить себя
+- `PATCH /admin/users/:id/plan` — смена тарифа (только для teacher); free/pro/school
+
+**Модель User:** добавлены поля `role: ENUM('teacher','student','admin')` + `active: BOOLEAN DEFAULT true` (миграция `20260709000002`). `auth.js` проверяет `active` при каждом запросе — деактивация немедленная без перелогина.
+
+**bootstrap:** `ADMIN_EMAIL` в `.env` → при старте `index.js` находит пользователя и повышает до admin. Первый admin создаётся так; следующих — через `/admin` → «Сменить роль».
+
+**Файлы:** `admin.controller.js`, `admin.routes.js`
+
+---
+
+## 11. Инфраструктура ✅
 
 ### Запуск
 - `development`: `sync({ alter: true })` — автосинхронизация схемы

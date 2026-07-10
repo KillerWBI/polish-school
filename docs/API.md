@@ -21,6 +21,10 @@ Response format:
 | POST | `/auth/logout` | — | — | Гасит refresh-cookie |
 | GET | `/auth/me` | ✅ | any | Текущий пользователь |
 | PUT | `/auth/password` | ✅ | any | Смена пароля |
+| GET | `/auth/verify-email?token=` | — | — | Подтверждение email (24ч TTL) |
+| POST | `/auth/resend-verification` | ✅ | any | Повторная отправка письма верификации |
+| POST | `/auth/forgot-password` | — | — | Отправить ссылку сброса пароля (всегда 200) |
+| POST | `/auth/reset-password` | — | — | Новый пароль по токену (TTL 1ч) |
 
 > **Токены (2026-07-01):** access-JWT **7д** — в теле ответа (`data.token`), фронт хранит в localStorage и шлёт `Authorization: Bearer`. Refresh-JWT **30д** — в **httpOnly-cookie** (`path=/api/v1/auth`), JS его не видит. Access истёк → фронт зовёт `/auth/refresh` (с `withCredentials`) → новый access → повторяет запрос. `/auth/logout` чистит cookie.
 
@@ -496,6 +500,7 @@ GET /users/@ivan_petrov/profile
 | Method | Path | Auth | Role | Описание |
 |--------|------|------|------|----------|
 | GET | `/payments/debt` | ✅ | student | Мой долг по каждому учителю |
+| GET | `/payments/my-history` | ✅ | student | Моя история оплат (по всем учителям) + сводка |
 | GET | `/payments/debts` | ✅ | teacher | Долг каждого моего ученика |
 | GET | `/payments/history` | ✅ | teacher | История оплат с фильтрами + сводка по способам |
 | POST | `/payments/record` | ✅ | teacher | Внести оплату от ученика (со способом) |
@@ -507,6 +512,18 @@ GET /users/@ivan_petrov/profile
 { "data": [{ "teacher": { "id", "name", "email" }, "charged", "paid", "balance" }] }
 // charged — сумма цен подтверждённых посещений (present=true)
 // paid    — сумма PaymentRecord от этого студента этому учителю
+```
+
+### GET /payments/my-history (студент)
+```json
+// Query (все опциональны): ?method=cash|card|transfer|online&from=YYYY-MM-DD&to=YYYY-MM-DD
+// studentId(ы) берутся из токена (getStudentIdsForUser); сортировка по paidAt DESC
+// Response 200
+{
+  "data": [{ "id", "amount", "method", "source", "paidAt", "teacher": { "id", "name" } }],
+  "summary": { "total": 450, "byMethod": { "cash": 300, "transfer": 150 } }
+}
+// Показывает КОМУ платил (teacher), в отличие от учительской /history (показывает student)
 ```
 
 ### GET /payments/debts (учитель)
@@ -610,6 +627,117 @@ GET /users/@ivan_petrov/profile
 
 // Ошибки: 404 не найдено; 403 не своё приглашение / не student;
 //         400 уже обработано (status != pending)
+```
+
+---
+
+## Admin ✅ (2026-07-09)
+
+Все эндпоинты за `auth + isAdmin`. `isTeacher` пропускает admin.
+
+| Method | Path | Auth | Role | Описание |
+|--------|------|------|------|----------|
+| GET | `/admin/stats` | ✅ | admin | KPI платформы (учителя/студенты/группы/уроки/выручка) |
+| GET | `/admin/teachers` | ✅ | admin | Список учителей с тарифом и статусом |
+| GET | `/admin/users` | ✅ | admin | Все пользователи; фильтр `?role=&active=` |
+| PATCH | `/admin/users/:id/deactivate` | ✅ | admin | Деактивировать пользователя (нельзя другого admin) |
+| PATCH | `/admin/users/:id/activate` | ✅ | admin | Восстановить доступ |
+| PATCH | `/admin/users/:id/role` | ✅ | admin | Сменить роль (teacher/student/admin); нельзя понизить себя |
+| PATCH | `/admin/users/:id/plan` | ✅ | admin | Сменить тариф (только для teacher); free/pro/school |
+| GET | `/admin/support` | ✅ | admin | Обращения в поддержку; фильтр `?status=&category=`; `meta.counts` по статусам |
+| PATCH | `/admin/support/:id` | ✅ | admin | Ответить (email автору) + сменить статус |
+
+```json
+// GET /admin/stats → Response 200
+{ "data": { "teachers": 12, "students": 145, "groups": 38, "lessons": 870, "revenue": 145000 } }
+
+// PATCH /admin/users/:id/role — Body
+{ "role": "admin" }
+
+// PATCH /admin/users/:id/plan — Body
+{ "plan": "pro" }
+
+// PATCH /admin/support/:id — Body (Zod updateTicket)
+{ "status": "resolved", "adminReply": "Текст ответа" }
+// adminReply (опц.) → шлёт письмо на email автора (best-effort) + ставит repliedAt;
+// если задан adminReply без status → статус ставится 'resolved'.
+```
+
+---
+
+## Support (обращения в поддержку)
+
+Публичная форма (гость или залогиненный) + ответ из админки по email.
+
+| Method | Path | Auth | Role | Описание |
+|--------|------|------|------|----------|
+| POST | `/support/ticket` | — (optionalAuth) | — | Создать обращение (rate-limit 3/час на IP) |
+
+```json
+// POST /support/ticket — Body (Zod createTicket)
+{ "name": "Аня", "email": "anna@mail.com", "subject": "Не приходит письмо", "category": "problem", "message": "..." }
+// category ∈ question|problem|billing (опц., по умолчанию question)
+// optionalAuth: если запрос авторизован — привяжется userId; гость тоже может писать.
+// Response 201
+{ "data": { "id": "<uuid>" } }
+```
+
+Модель `SupportTicket`: `{ id, userId?, name, email, subject, category, message, status(open|in_progress|resolved), adminReply?, repliedAt?, createdAt }`.
+
+---
+
+## Notifications (in-app уведомления)
+
+Создаются автоматически на события (новое ДЗ, оценка, оплата, приглашение, посещаемость). Email-канал — позже (нужен домен).
+
+| Method | Path | Auth | Role | Описание |
+|--------|------|------|------|----------|
+| GET | `/notifications` | ✅ | any | Мои (последние 50); `?unread=true` — только непрочитанные; `meta.unreadCount` |
+| PATCH | `/notifications/:id/read` | ✅ | any | Отметить одно прочитанным |
+| PATCH | `/notifications/read-all` | ✅ | any | Отметить все прочитанными |
+
+```json
+// GET /notifications → Response 200
+{ "data": [{ "id","type","title","body","link","readAt","createdAt" }], "meta": { "unreadCount": 3 } }
+```
+
+Типы: `homework_assigned` (студентам группы при создании ДЗ), `homework_graded` (ученику при оценке), `attendance_pending` (студентам при отметке посещения), `invitation_received` (приглашённому), `payment_recorded` (ученику при внесении оплаты). Хелпер `utils/notify.js` (`createNotification`, `notifyMany`) — best-effort, не блокирует основной поток.
+
+## Student self-service (личный кабинет ученика)
+
+| Method | Path | Auth | Role | Описание |
+|--------|------|------|------|----------|
+| GET | `/vocab` | ✅ | student | Словарь (фильтр `?status=`, пагинация) + `meta.counts` |
+| GET | `/vocab/due` | ✅ | student | Слова к повторению сегодня (SR) |
+| POST | `/vocab` | ✅ | student | Добавить слово |
+| PUT | `/vocab/:id` | ✅ | student | Редактировать |
+| PATCH | `/vocab/:id/review` | ✅ | student | Результат повторения `{correct}` (SR-интервал) |
+| DELETE | `/vocab/:id` | ✅ | student | Удалить |
+| GET | `/my-lessons` | ✅ | student | Журнал внешних/самостоятельных занятий (фильтры) |
+| GET | `/my-lessons/stats` | ✅ | student | Сводка: занятий/часов/долг/оплачено + разбивки |
+| POST/PUT/DELETE | `/my-lessons/:id?` | ✅ | student | CRUD записей |
+| PATCH | `/my-lessons/:id/pay` | ✅ | student | Отметить оплаченным |
+| GET/POST | `/notes` | ✅ | student | Заметки (фильтр `?lessonId=`) |
+| PUT/DELETE | `/notes/:id` | ✅ | student | Редактировать/удалить заметку |
+| GET | `/students/me/progress` | ✅ | student | Прогресс-центр: streak, активность по дням, словарь, внешние занятия |
+| GET | `/materials` | ✅ | any | Материалы уроков (role-switch: свои/доступные) |
+
+## Dashboard
+
+| Method | Path | Auth | Role | Описание |
+|--------|------|------|------|----------|
+| GET | `/dashboard` | ✅ | any | KPI для текущей роли (teacher / student) |
+| GET | `/dashboard/activity` | ✅ | any | Лента последних событий |
+
+```json
+// GET /dashboard (teacher) → Response 200
+{ "data": { "studentsCount", "lessonsThisWeek", "totalDebt", "avgAttendance", "todayLessons": [], "upcomingLessons": [] } }
+
+// GET /dashboard (student) → Response 200
+{ "data": { "lessonsThisWeek", "pendingHomework", "attendance", "debt", "homeworkList": [], "recentGrades": [] } }
+
+// GET /dashboard/activity → Response 200
+{ "data": [{ "type": "submission"|"payment"|"attendance", "text": "...", "at": "ISO" }] }
 ```
 
 ---
