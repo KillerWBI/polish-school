@@ -78,8 +78,10 @@ module.exports = {
       updatedAt:          { type: DataTypes.DATE, allowNull: false },
     });
 
-    // 7. Homeworks (зависит от Lessons, IndividualLessons)
-    await queryInterface.createTable('Homeworks', {
+    // 7. Homework (зависит от Lessons, IndividualLessons).
+    // Имя таблицы — «Homework» (единственное): модель sequelize.define('Homework')
+    // не склоняет неисчисляемое слово, поэтому и таблица одноимённая.
+    await queryInterface.createTable('Homework', {
       id:                 { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
       lessonId:           { type: DataTypes.UUID, allowNull: true, references: { model: 'Lessons', key: 'id' }, onDelete: 'CASCADE' },
       individualLessonId: { type: DataTypes.UUID, allowNull: true, references: { model: 'IndividualLessons', key: 'id' }, onDelete: 'CASCADE' },
@@ -89,10 +91,10 @@ module.exports = {
       updatedAt:          { type: DataTypes.DATE, allowNull: false },
     });
 
-    // 8. HomeworkSubmissions (зависит от Homeworks, Users)
+    // 8. HomeworkSubmissions (зависит от Homework, Users)
     await queryInterface.createTable('HomeworkSubmissions', {
       id:         { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
-      homeworkId: { type: DataTypes.UUID, allowNull: false, references: { model: 'Homeworks', key: 'id' }, onDelete: 'CASCADE' },
+      homeworkId: { type: DataTypes.UUID, allowNull: false, references: { model: 'Homework', key: 'id' }, onDelete: 'CASCADE' },
       studentId:  { type: DataTypes.UUID, allowNull: false, references: { model: 'Users', key: 'id' }, onDelete: 'CASCADE' },
       fileUrl:    { type: DataTypes.STRING, allowNull: false },
       comment:    { type: DataTypes.TEXT, allowNull: true },
@@ -134,7 +136,7 @@ module.exports = {
     await queryInterface.dropTable('Payments');
     await queryInterface.dropTable('Attendances');
     await queryInterface.dropTable('HomeworkSubmissions');
-    await queryInterface.dropTable('Homeworks');
+    await queryInterface.dropTable('Homework');
     await queryInterface.dropTable('IndividualLessons');
     await queryInterface.dropTable('IndividualCourses');
     await queryInterface.dropTable('Lessons');

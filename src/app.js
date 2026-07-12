@@ -144,6 +144,7 @@ app.use('/api/v1/my-lessons',         require('./routes/studentLessonLog.routes'
 app.use('/api/v1/notes',              require('./routes/studentNote.routes'));
 app.use('/api/v1/materials',          require('./routes/materials.routes'));
 app.use('/api/v1/notifications',      require('./routes/notification.routes'));
+app.use('/api/v1/topics',             require('./routes/topic.routes'));
 
 // Глобальный обработчик ошибок
 app.use((err, req, res, next) => {

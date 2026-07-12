@@ -59,6 +59,11 @@ const Quiz = sequelize.define('Quiz', {
     type: DataTypes.UUID,
     allowNull: true,
   },
+  // Если это практика по личной теме ученика — ссылка на тему (история для адаптивной генерации)
+  topicId: {
+    type: DataTypes.UUID,
+    allowNull: true,
+  },
 });
 
 module.exports = Quiz;

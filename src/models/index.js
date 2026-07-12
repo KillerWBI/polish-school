@@ -17,6 +17,7 @@ const VocabItem = require('./VocabItem');
 const StudentLessonLog = require('./StudentLessonLog');
 const StudentNote = require('./StudentNote');
 const Notification = require('./Notification');
+const Topic = require('./Topic');
 
 // Group ↔ User (teacher)
 Group.belongsTo(User, { foreignKey: 'teacherId', as: 'teacher' });
@@ -102,6 +103,11 @@ StudentNote.belongsTo(IndividualLesson, { foreignKey: 'individualLessonId' });
 // Notification ↔ User (получатель)
 Notification.belongsTo(User, { foreignKey: 'userId', as: 'recipient' });
 
+// Topic ↔ User (владелец-ученик) / Quiz (попытки-практики по теме)
+Topic.belongsTo(User, { foreignKey: 'userId', as: 'owner' });
+Topic.hasMany(Quiz, { foreignKey: 'topicId', as: 'attemptsList' });
+Quiz.belongsTo(Topic, { foreignKey: 'topicId', as: 'topicRef' });
+
 module.exports = {
   User,
   Group,
@@ -122,4 +128,5 @@ module.exports = {
   StudentLessonLog,
   StudentNote,
   Notification,
+  Topic,
 };

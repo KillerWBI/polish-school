@@ -13,7 +13,7 @@ const getStudentDebtTotal = async (studentId) => {
   const charged = await computeChargedByTeacher(studentId);
 
   const records = await PaymentRecord.findAll({
-    where: { studentId },
+    where: { studentId, status: 'approved' },
     attributes: ['teacherId', 'amount'],
   });
   // Map: teacherId → сумма оплаченного
@@ -54,7 +54,7 @@ const fetchChargesAndPayments = async (studentIds, teacherId) => {
       include: [{ model: IndividualLesson, required: true, where: { teacherId }, attributes: ['pricePerLesson'] }],
     }),
     PaymentRecord.findAll({
-      where: { studentId: studentIds, teacherId },
+      where: { studentId: studentIds, teacherId, status: 'approved' },
       attributes: ['studentId', 'amount'],
     }),
   ]);
@@ -157,11 +157,12 @@ const recordPayment = async (req, res) => {
 const getPaymentHistory = async (req, res) => {
   try {
     const teacherId = req.user.id;
-    const { studentId, method, from, to } = req.query;
+    const { studentId, method, from, to, status } = req.query;
 
     const where = { teacherId };
     if (studentId) where.studentId = studentId;
     if (method) where.method = method;
+    if (status) where.status = status; // pending | approved | rejected
     if (from || to) {
       where.paidAt = {};
       if (from) where.paidAt[Op.gte] = new Date(from);
@@ -178,10 +179,11 @@ const getPaymentHistory = async (req, res) => {
       include: [{ model: Student, as: 'student', attributes: ['id', 'name'] }],
     });
 
-    // Сводка по способам оплаты (в рамках текущего фильтра)
+    // Сводка «поступило» — только по подтверждённым (approved) записям
     const byMethod = {};
     let total = 0;
     for (const r of records) {
+      if (r.status !== 'approved') continue;
       const amt = parseFloat(r.amount) || 0;
       total += amt;
       byMethod[r.method] = (byMethod[r.method] ?? 0) + amt;
@@ -192,7 +194,11 @@ const getPaymentHistory = async (req, res) => {
       amount: parseFloat(r.amount) || 0,
       method: r.method,
       source: r.source,
+      status: r.status,
+      rejectionReason: r.rejectionReason,
+      screenshotUrl: r.screenshotUrl,
       paidAt: r.paidAt,
+      reviewedAt: r.reviewedAt,
       student: r.student ? { id: r.student.id, name: r.student.name } : null,
     }));
 
@@ -210,9 +216,10 @@ const getMyPaymentHistory = async (req, res) => {
     const myStudentIds = await getStudentIdsForUser(req.user.id);
     if (!myStudentIds.length) return res.json({ data: [], summary: { total: 0, byMethod: {} } });
 
-    const { method, from, to } = req.query;
+    const { method, from, to, status } = req.query;
     const where = { studentId: myStudentIds };
     if (method) where.method = method;
+    if (status) where.status = status;
     if (from || to) {
       where.paidAt = {};
       if (from) where.paidAt[Op.gte] = new Date(from);
@@ -229,9 +236,11 @@ const getMyPaymentHistory = async (req, res) => {
       include: [{ model: User, as: 'teacher', attributes: ['id', 'name'] }],
     });
 
+    // «Оплачено» — только подтверждённые
     const byMethod = {};
     let total = 0;
     for (const r of records) {
+      if (r.status !== 'approved') continue;
       const amt = parseFloat(r.amount) || 0;
       total += amt;
       byMethod[r.method] = (byMethod[r.method] ?? 0) + amt;
@@ -242,7 +251,11 @@ const getMyPaymentHistory = async (req, res) => {
       amount: parseFloat(r.amount) || 0,
       method: r.method,
       source: r.source,
+      status: r.status,
+      rejectionReason: r.rejectionReason,
+      screenshotUrl: r.screenshotUrl,
       paidAt: r.paidAt,
+      reviewedAt: r.reviewedAt,
       teacher: r.teacher ? { id: r.teacher.id, name: r.teacher.name } : null,
     }));
 
@@ -275,7 +288,7 @@ const getDebt = async (req, res) => {
         include: [{ model: IndividualLesson, required: true, attributes: ['teacherId', 'pricePerLesson'] }],
       }),
       PaymentRecord.findAll({
-        where: { studentId: myStudentIds },
+        where: { studentId: myStudentIds, status: 'approved' },
         attributes: ['teacherId', 'amount'],
       }),
     ]);
@@ -382,14 +395,29 @@ const studentRecordPayment = async (req, res) => {
     const student = await Student.findOne({ where: { userId, teacherId } });
     if (!student) return res.status(403).json({ error: 'Вы не ученик этого преподавателя' });
 
+    // Способ = реальный канал учителя, который выбрал ученик (перевод/BLIK/PayPal/Revolut/другое)
+    const VALID_METHODS = ['cash', 'card', 'transfer', 'blik', 'paypal', 'revolut', 'other'];
+    const safeMethod = VALID_METHODS.includes(method) ? method : 'transfer';
+
+    // source='student' + status='pending' — оплата ждёт проверки учителя (в долг пока НЕ идёт)
     const record = await PaymentRecord.create({
       studentId: student.id,
       teacherId,
       amount: parseFloat(amount),
-      method: method || 'transfer',
+      method: safeMethod,
       source: 'student',
+      status: 'pending',
       screenshotUrl: screenshotUrl || null,
     });
+
+    // Уведомляем учителя о новой оплате на проверку (fire-and-forget)
+    createNotification(teacherId, {
+      type: 'payment_submitted',
+      title: 'Оплата на проверку',
+      body: `${student.name}: ${Math.round(parseFloat(amount))} zł`,
+      link: '/payments',
+    });
+
     res.status(201).json({ data: record });
   } catch (err) {
     console.error(err);
@@ -397,4 +425,103 @@ const studentRecordPayment = async (req, res) => {
   }
 };
 
-module.exports = { computeChargedByTeacher, getDebt, getMyPaymentHistory, recordPayment, getPaymentHistory, getDebtsForTeacher, getStudentDebtTotal, getTeacherDebtTotal, getTeacherPaymentInfo, studentRecordPayment };
+// GET /payments/pending — оплаты учеников на проверке у этого учителя (со скрином)
+const getPendingPayments = async (req, res) => {
+  try {
+    const records = await PaymentRecord.findAll({
+      where: { teacherId: req.user.id, status: 'pending' },
+      order: [['paidAt', 'DESC']],
+      include: [{ model: Student, as: 'student', attributes: ['id', 'name'] }],
+    });
+    const data = records.map((r) => ({
+      id: r.id,
+      amount: parseFloat(r.amount) || 0,
+      method: r.method,
+      source: r.source,
+      status: r.status,
+      screenshotUrl: r.screenshotUrl,
+      paidAt: r.paidAt,
+      student: r.student ? { id: r.student.id, name: r.student.name } : null,
+    }));
+    res.json({ data });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Ошибка получения оплат на проверке' });
+  }
+};
+
+// PATCH /payments/:id/approve — учитель подтверждает оплату ученика
+const approvePayment = async (req, res) => {
+  try {
+    const record = await PaymentRecord.findOne({
+      where: { id: req.params.id, teacherId: req.user.id },
+      include: [{ model: Student, as: 'student', attributes: ['id', 'name', 'userId'] }],
+    });
+    if (!record) return res.status(404).json({ error: 'Оплата не найдена' });
+    if (record.status !== 'pending') return res.status(400).json({ error: 'Оплата уже рассмотрена' });
+
+    await record.update({ status: 'approved', reviewedAt: new Date(), rejectionReason: null });
+
+    if (record.student?.userId) {
+      createNotification(record.student.userId, {
+        type: 'payment_approved',
+        title: 'Оплата подтверждена',
+        body: `${Math.round(parseFloat(record.amount))} zł зачтено`,
+        link: '/payments',
+      });
+    }
+    res.json({ data: { id: record.id, status: 'approved' } });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Ошибка подтверждения оплаты' });
+  }
+};
+
+// PATCH /payments/:id/reject — учитель отклоняет оплату (с необязательной причиной)
+const rejectPayment = async (req, res) => {
+  try {
+    const reason = (req.body?.reason || '').toString().trim().slice(0, 500) || null;
+    const record = await PaymentRecord.findOne({
+      where: { id: req.params.id, teacherId: req.user.id },
+      include: [{ model: Student, as: 'student', attributes: ['id', 'name', 'userId'] }],
+    });
+    if (!record) return res.status(404).json({ error: 'Оплата не найдена' });
+    if (record.status !== 'pending') return res.status(400).json({ error: 'Оплата уже рассмотрена' });
+
+    await record.update({ status: 'rejected', reviewedAt: new Date(), rejectionReason: reason });
+
+    if (record.student?.userId) {
+      createNotification(record.student.userId, {
+        type: 'payment_rejected',
+        title: 'Оплата отклонена',
+        body: reason ? `Причина: ${reason}` : `${Math.round(parseFloat(record.amount))} zł`,
+        link: '/payments',
+      });
+    }
+    res.json({ data: { id: record.id, status: 'rejected' } });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Ошибка отклонения оплаты' });
+  }
+};
+
+// DELETE /payments/:id — ученик отменяет свою заявку, пока она на проверке
+const cancelMyPayment = async (req, res) => {
+  try {
+    const myStudentIds = await getStudentIdsForUser(req.user.id);
+    if (!myStudentIds.length) return res.status(404).json({ error: 'Оплата не найдена' });
+
+    const record = await PaymentRecord.findOne({
+      where: { id: req.params.id, studentId: myStudentIds, source: 'student', status: 'pending' },
+    });
+    if (!record) return res.status(404).json({ error: 'Заявку нельзя отменить (уже рассмотрена или не ваша)' });
+
+    await record.destroy();
+    res.json({ data: { id: req.params.id, cancelled: true } });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Ошибка отмены оплаты' });
+  }
+};
+
+module.exports = { computeChargedByTeacher, getDebt, getMyPaymentHistory, recordPayment, getPaymentHistory, getDebtsForTeacher, getStudentDebtTotal, getTeacherDebtTotal, getTeacherPaymentInfo, studentRecordPayment, getPendingPayments, approvePayment, rejectPayment, cancelMyPayment };

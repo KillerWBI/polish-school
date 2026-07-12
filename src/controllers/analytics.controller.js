@@ -100,7 +100,7 @@ const getTeacherAnalytics = async (req, res) => {
       WITH paid AS (
         SELECT TO_CHAR(pr."paidAt", :fmt) AS bucket, SUM(pr.amount)::float AS total
         FROM "PaymentRecords" pr
-        WHERE pr."teacherId" = :teacherId
+        WHERE pr."teacherId" = :teacherId AND pr.status = 'approved'
           AND pr."paidAt" >= NOW() - INTERVAL '${cfg.intervalSql}'
         GROUP BY 1
       ),
@@ -226,7 +226,7 @@ const getTeacherAnalytics = async (req, res) => {
     //  potential — все будущие запланированные уроки (от завтра) × цена
     const [totalRow] = await sequelize.query(`
       WITH paid AS (
-        SELECT COALESCE(SUM(amount),0)::float t FROM "PaymentRecords" WHERE "teacherId" = :teacherId
+        SELECT COALESCE(SUM(amount),0)::float t FROM "PaymentRecords" WHERE "teacherId" = :teacherId AND status = 'approved'
       ),
       charged AS (
         SELECT COALESCE(SUM(price),0)::float t FROM (

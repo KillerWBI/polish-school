@@ -14,17 +14,23 @@ const TYPE_HINT = {
   open:      'без вариантов (options: []), answer: []; добавь поле sampleAnswer с образцом ответа',
 };
 
-const buildPrompt = ({ topic, count, difficulty, type, language }) => `Составь учебный тест для любого предмета.
+const buildPrompt = ({ topic, count, difficulty, type, language, avoid }) => {
+  // avoid — тексты недавних вопросов, чтобы ИИ не повторял их (адаптивная практика).
+  const avoidBlock = Array.isArray(avoid) && avoid.length
+    ? `\nНЕ повторяй и не перефразируй эти уже заданные вопросы (придумай новые по той же теме):\n${avoid.map((q) => `- ${q}`).join('\n')}\n`
+    : '';
+  return `Составь учебный тест для любого предмета.
 Тема: "${topic}".
 Язык теста: ${language}.
 Количество вопросов: ${count}.
 Сложность: ${difficulty}.
 Тип вопросов: ${TYPE_HINT[type]}.
-
+${avoidBlock}
 Верни СТРОГО валидный JSON без markdown, без текста вокруг, по схеме:
 {"questions":[{"question":"...","options":["..."],"answer":[0],"sampleAnswer":"","explanation":"..."}]}
 - explanation — краткое пояснение правильного ответа (1–2 предложения).
 - Ничего, кроме JSON, не выводи.`;
+};
 
 // Достаём JSON даже если модель обернула его в ```json ... ``` или добавила текст.
 const extractJson = (text) => {
