@@ -9,7 +9,7 @@ const getStats = async (req, res) => {
       User.count({ where: { role: 'student', active: true } }),
       Group.count(),
       Lesson.count(),
-      PaymentRecord.sum('amount'),
+      PaymentRecord.sum('amount', { where: { status: 'approved' } }),
     ]);
     res.json({
       data: {

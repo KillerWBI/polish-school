@@ -22,9 +22,10 @@ const PaymentRecord = sequelize.define('PaymentRecord', {
     type: DataTypes.DECIMAL(10, 2),
     allowNull: false,
   },
-  // Способ оплаты: наличные / карта / перевод / онлайн-платёж
+  // Способ оплаты. Базовые: наличные/карта/перевод. Доп. каналы учителя: BLIK/PayPal/Revolut/другое.
+  // 'online' — легаси (старые записи), в новых не используется.
   method: {
-    type: DataTypes.ENUM('cash', 'card', 'transfer', 'online'),
+    type: DataTypes.ENUM('cash', 'card', 'transfer', 'blik', 'paypal', 'revolut', 'other', 'online'),
     allowNull: false,
     defaultValue: 'cash',
   },
@@ -33,6 +34,23 @@ const PaymentRecord = sequelize.define('PaymentRecord', {
     type: DataTypes.ENUM('manual', 'online', 'student'),
     allowNull: false,
     defaultValue: 'manual',
+  },
+  // Статус модерации: pending (на проверке, в долг не идёт) → approved / rejected.
+  // manual/online создаются сразу approved; student-оплата — pending до решения учителя.
+  status: {
+    type: DataTypes.ENUM('pending', 'approved', 'rejected'),
+    allowNull: false,
+    defaultValue: 'approved',
+  },
+  // Причина отклонения (необязательная, видна ученику)
+  rejectionReason: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+  // Когда учитель рассмотрел (approve/reject)
+  reviewedAt: {
+    type: DataTypes.DATE,
+    allowNull: true,
   },
   // Скриншот-подтверждение от ученика (Cloudinary URL)
   screenshotUrl: {

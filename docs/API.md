@@ -499,11 +499,16 @@ GET /users/@ivan_petrov/profile
 
 | Method | Path | Auth | Role | Описание |
 |--------|------|------|------|----------|
-| GET | `/payments/debt` | ✅ | student | Мой долг по каждому учителю |
-| GET | `/payments/my-history` | ✅ | student | Моя история оплат (по всем учителям) + сводка |
+| GET | `/payments/debt` | ✅ | student | Мой долг по каждому учителю (только approved засчитаны) |
+| GET | `/payments/my-history` | ✅ | student | Моя история оплат (`?status=pending\|approved\|rejected`) + сводка |
+| DELETE | `/payments/:id` | ✅ | student | Отменить свою заявку, пока `pending` (source='student') |
 | GET | `/payments/debts` | ✅ | teacher | Долг каждого моего ученика |
-| GET | `/payments/history` | ✅ | teacher | История оплат с фильтрами + сводка по способам |
-| POST | `/payments/record` | ✅ | teacher | Внести оплату от ученика (со способом) |
+| GET | `/payments/history` | ✅ | teacher | История оплат (`?status=`) + детали (скрин/причина/статус) |
+| GET | `/payments/pending` | ✅ | teacher | Оплаты учеников на проверке (со скрином) |
+| PATCH | `/payments/:id/approve` | ✅ | teacher | Подтвердить оплату (идёт в долг) |
+| PATCH | `/payments/:id/reject` | ✅ | teacher | Отклонить оплату (body `{reason?}`) |
+| POST | `/payments/record` | ✅ | teacher | Внести оплату от ученика (сразу approved) |
+| POST | `/payments/student-pay` | ✅ | student | Ученик подаёт оплату со скрином (создаётся `pending`) |
 
 ### GET /payments/debt (студент)
 ```json
@@ -544,6 +549,15 @@ GET /users/@ivan_petrov/profile
 }
 // summary считается в рамках текущего фильтра
 ```
+
+### Модерация оплат ученика (2026-07-11)
+`PaymentRecord.status`: `pending` → `approved` / `rejected`. **В долг засчитываются только `approved`** (все агрегации `paid` фильтруют по статусу: `getDebt`, `fetchChargesAndPayments`, `getStudentDebtTotal`, analytics revenue, admin stats).
+- Ученик `POST /payments/student-pay` → создаётся `status='pending'` (source='student', со `screenshotUrl`), долг **не** уменьшается; учителю летит уведомление `payment_submitted`.
+- Учитель `GET /payments/pending` видит очередь со скрином; `PATCH /:id/approve` → `approved` (долг уменьшается, уведомление `payment_approved`); `PATCH /:id/reject {reason?}` → `rejected` (`rejectionReason`, уведомление `payment_rejected`).
+- Ученик `DELETE /:id` отменяет свою заявку, пока `pending`.
+- История (обе роли) принимает `?status=` и отдаёт `screenshotUrl`/`status`/`rejectionReason`/`reviewedAt`.
+
+**Способы оплаты (2026-07-12):** ENUM `method` расширен — базовые `cash/card/transfer` + доп.каналы `blik/paypal/revolut/other` (`online` — легаси). Ученик при оплате видит только каналы, которые учитель заполнил в `paymentDetails` (iban→transfer, blik, paypal, revolut, customLabel→other). Разбивка «по способам» на странице финансов = базовые 3 + доп.каналы учителя + всё, где реально были оплаты. Миграция `20260712000001` (`ALTER TYPE ADD VALUE`). BLIK — отдельный способ (польская специфика), не «карта».
 
 ### POST /payments/record (учитель)
 ```json
