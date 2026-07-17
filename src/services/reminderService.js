@@ -1,9 +1,10 @@
-const { Op } = require('sequelize');
+const { Op, fn, col } = require('sequelize');
 const {
   Lesson, IndividualLesson, Homework, HomeworkSubmission,
-  Group, GroupStudent, Student, User,
+  Group, GroupStudent, Student, User, TrackCard, VocabItem,
 } = require('../models');
 const { sendLessonReminderEmail, sendHomeworkReminderEmail } = require('./email');
+const { createNotification } = require('../utils/notify');
 
 // Запускается раз в сутки (из index.js через node-cron).
 // Находит все уроки и дедлайны ДЗ на ЗАВТРА и шлёт напоминания
@@ -19,9 +20,48 @@ const runReminders = async () => {
     remindGroupLessons(tomorrow),
     remindIndividualLessons(tomorrow),
     remindHomeworkDeadlines(tomorrow),
+    remindDueReviews(),
   ]);
 
   console.log('[reminders] завершён');
+};
+
+// In-app напоминание о карточках/словах к повторению (по всем ученикам с due-элементами).
+// Email не шлём — это самообучение, канал in-app (колокольчик), email — после домена.
+const remindDueReviews = async () => {
+  const now = new Date();
+  const dueWhere = { status: { [Op.ne]: 'known' }, nextReviewAt: { [Op.lte]: now } };
+  const countBy = async (Model) => {
+    const rows = await Model.findAll({
+      where: dueWhere,
+      attributes: ['userId', [fn('COUNT', col('id')), 'n']],
+      group: ['userId'], raw: true,
+    }).catch(() => []);
+    return rows;
+  };
+  const perUser = new Map();
+  for (const Model of [TrackCard, VocabItem]) {
+    for (const r of await countBy(Model)) {
+      perUser.set(r.userId, (perUser.get(r.userId) || 0) + Number(r.n));
+    }
+  }
+  for (const [userId, total] of perUser) {
+    if (total <= 0) continue;
+    createNotification(userId, {
+      type: 'review_due',
+      title: `${total} ${pluralCards(total)} на повторение`,
+      body: 'Пройдите ежедневную сессию, чтобы закрепить материал.',
+      link: '/study',
+    }).catch(() => {});
+  }
+};
+
+// «карточка/карточки/карточек» по числу
+const pluralCards = (n) => {
+  const m10 = n % 10, m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return 'карточка';
+  if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return 'карточки';
+  return 'карточек';
 };
 
 // Групповые уроки — все студенты группы с реальными аккаунтами

@@ -16,6 +16,15 @@ const Topic = sequelize.define('Topic', {
   },
   title:   { type: DataTypes.STRING, allowNull: false },
   subject: { type: DataTypes.STRING, allowNull: true },
+  // Учебная цель темы (одно предложение, генерируется AI вместе с роадмапом)
+  goal:    { type: DataTypes.TEXT, allowNull: true },
+  // Роадмап подтем (шаги от базового к продвинутому):
+  // [{ id, title, order, mastery(0..100), attempts }]. Обладание считается по шагу.
+  roadmap: {
+    type: DataTypes.JSONB,
+    allowNull: false,
+    defaultValue: [],
+  },
   // % обладания темой (текущий уровень по EMA), 0..100
   masteryPercent: {
     type: DataTypes.FLOAT,

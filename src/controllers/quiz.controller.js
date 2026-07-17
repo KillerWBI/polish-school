@@ -18,8 +18,9 @@ const create = async (req, res) => {
 // GET /quizzes — мои тесты (мета + число вопросов, без тела вопросов)
 const list = async (req, res) => {
   try {
+    // topicId: null — исключаем практики по учебным темам (у них своя страница/история)
     const quizzes = await Quiz.findAll({
-      where: { teacherId: req.user.id },
+      where: { teacherId: req.user.id, topicId: null },
       order: [['createdAt', 'DESC']],
     });
     const data = quizzes.map((q) => ({

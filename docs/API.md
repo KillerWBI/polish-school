@@ -736,6 +736,60 @@ GET /users/@ivan_petrov/profile
 | GET | `/students/me/progress` | ✅ | student | Прогресс-центр: streak, активность по дням, словарь, внешние занятия |
 | GET | `/materials` | ✅ | any | Материалы уроков (role-switch: свои/доступные) |
 
+## Learning Tracks / Темы (адаптивное самообучение)
+> Личный учебный трек ученика по любой теме. При создании AI строит роадмап подтем; практика идёт по шагам, обладание (EMA) считается по каждому шагу. Попытки сохраняются как `Quiz` (с `topicId`+`stepId`) — они исключены из `GET /quizzes`.
+
+| Method | Path | Auth | Role | Описание |
+|--------|------|------|------|----------|
+| GET | `/topics` | ✅ | student | Мои треки (с `masteryPercent`, `roadmap`, `attempts`) |
+| GET | `/topics/:id` | ✅ | student | Трек + роадмап + история попыток |
+| POST | `/topics` | ✅ | student | Создать трек (AI генерит `goal` + `roadmap` из 4–8 шагов; фолбэк = 1 шаг) |
+| DELETE | `/topics/:id` | ✅ | student | Удалить трек (попытки каскадом) |
+| POST | `/topics/:id/next` | ✅ | student | Сгенерировать практику по шагу (Body `{stepId, type?}` — `single` тест / `open` открытый ответ); сложность по mastery, анти-повтор |
+| POST | `/topics/:id/attempt` | ✅ | student | Записать результат теста (Body `{stepId,questions,answers,score,total,difficulty}`) → EMA |
+| POST | `/topics/:id/grade-open` | ✅ | student | ИИ-оценка открытых ответов (Body `{stepId,questions,answers,difficulty}`) → `{results:[{score,feedback}],avg,score,total,topic}`; сохраняет попытку `type=open`, EMA |
+| GET | `/topics/:id/sources` | ✅ | student | Сохранённые источники трека (`?stepId=`) — видны на странице темы под шагом |
+| POST | `/topics/:id/sources` | ✅ | student | Подобрать источники к шагу (Body `{stepId, loose?}`) — ИИ (с анти-повтором avoid) → проверка существования (Google Books/GET-ссылки) → **сохраняет и возвращает новые**. `loose=true` — добавляет «менее проверенные» (`verified:false`) |
+| DELETE | `/topics/:id/sources/:sourceId` | ✅ | student | Удалить источник |
+| POST | `/topics/:id/cards/from-text` | ✅ | student | Импорт карточек из текста (Body `{stepId,text,count?}`) — ИИ делает front/back строго по тексту |
+
+```json
+// GET /topics/:id → Response 200
+{ "data": {
+  "topic": { "id","title","subject","goal","masteryPercent","attempts",
+             "roadmap": [{ "id","title","order","mastery","attempts" }] },
+  "attempts": [{ "id","stepId","difficulty","score","total","createdAt" }]
+} }
+
+// POST /topics/:id/next → Response 200
+{ "data": { "topic": "Дроби — Сложение", "stepId", "type": "single", "difficulty": "easy",
+            "questions": [{ "question","options":[],"answer":[0],"sampleAnswer","explanation" }] } }
+// Ошибки: 503 AI не настроен (NO_AI_KEY); 400 шаг не найден; 502 сбой генерации
+
+// Разбор пройденной попытки — переиспользует GET /quizzes/:id (Quiz принадлежит ученику).
+```
+
+### Флеш-карточки трека (Фаза 2 — SR-повторение)
+| Method | Path | Auth | Role | Описание |
+|--------|------|------|------|----------|
+| POST | `/topics/:id/cards/generate` | ✅ | student | Сгенерировать карточки по шагу (Body `{stepId, count?}`) — AI front/back, сохранить |
+| GET | `/topics/:id/cards` | ✅ | student | Карточки трека (`?stepId=`) + `meta.dueCount` |
+| GET | `/topics/:id/cards/due` | ✅ | student | Карточки к повторению сейчас (status≠known, nextReviewAt≤now) |
+| PATCH | `/topics/:id/cards/:cardId/review` | ✅ | student | Результат повторения (Body `{correct}`) → SR (`utils/sr.js`) |
+| DELETE | `/topics/:id/cards/:cardId` | ✅ | student | Удалить карточку |
+
+```
+// SR: верно → nextReviewAt = now + 2^streak дней, streak++, 5 подряд → 'known';
+//     неверно → now + 1ч, streak=0, 'learning'. Общая формула со словарём (VocabItem).
+```
+
+### Ежедневная сессия (Фаза 2 — повторение со всех треков + словаря)
+| Method | Path | Auth | Role | Описание |
+|--------|------|------|------|----------|
+| GET | `/study/session` | ✅ | student | Все due-карточки (треки + словарь), нормализованы `{id,kind:'card'|'vocab',front,back,context}` + `meta.{cards,vocab,total}` (кап 40) |
+| GET | `/study/weak-spots` | ✅ | student | Слабые места: практикованные шаги с обладанием <70% по всем трекам (слабейшие первыми, до 12) |
+| POST | `/study/review` | ✅ | student | Единый вход результата (Body `{kind,id,correct}`) → диспетч на TrackCard/VocabItem → SR |
+
 ## Dashboard
 
 | Method | Path | Auth | Role | Описание |
@@ -822,6 +876,23 @@ Query: ?cursor=&limit=   (limit 1..50, default 10)
   "nextCursor": "<строка|null>"   // null = постов больше нет
 }
 ```
+
+---
+
+## Billing (Paddle) — подписки
+
+| Method | Path | Auth | Описание |
+|--------|------|------|----------|
+| POST | `/billing/webhook` | подпись Paddle | Приём событий Paddle (Billing). Тело **RAW** (смонтирован до `express.json` в `app.js`). Проверка подписи `Paddle-Signature` через `PADDLE_WEBHOOK_SECRET`. |
+
+```
+// Обработка (billing.controller):
+// subscription.created/activated/updated/resumed → User.plan = planForPrice(price.id) ('pro'/'school'),
+//   +paddleCustomerId/paddleSubscriptionId/subscriptionStatus. Юзер ищется по custom_data.userId.
+// subscription.canceled/paused → plan='free'.
+// Плохая подпись → 401. Ошибка парсинга → 200 (чтобы Paddle не ретраил).
+```
+> **Env:** `PADDLE_WEBHOOK_SECRET`, `PADDLE_PRICE_PRO`, `PADDLE_PRICE_SCHOOL` (map price→plan). Фронт: `VITE_PADDLE_ENV/CLIENT_TOKEN/PRICE_PRO` (Paddle.js overlay на `/plans`). Тестируется в **Sandbox** (локально вебхук — через ngrok). Прод: сменить URL вебхука на домен + Production-ключи.
 
 ---
 
