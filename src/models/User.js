@@ -31,12 +31,16 @@ const User = sequelize.define('User', {
     allowNull: false,
     defaultValue: true,
   },
-  // Тариф учителя (SaaS-подписка). Оплата подписки — позже, через платёжку.
+  // Тариф учителя (SaaS-подписка). Управляется вебхуками Paddle (billing).
   plan: {
     type: DataTypes.ENUM('free', 'pro', 'school'),
     allowNull: false,
     defaultValue: 'free',
   },
+  // Paddle billing — идентификаторы подписки (для управления/отмены)
+  paddleCustomerId:     { type: DataTypes.STRING, allowNull: true },
+  paddleSubscriptionId: { type: DataTypes.STRING, allowNull: true },
+  subscriptionStatus:   { type: DataTypes.STRING, allowNull: true }, // active/trialing/past_due/canceled…
   // Email verification (Resend)
   emailVerified: {
     type: DataTypes.BOOLEAN,

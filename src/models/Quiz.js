@@ -64,6 +64,11 @@ const Quiz = sequelize.define('Quiz', {
     type: DataTypes.UUID,
     allowNull: true,
   },
+  // Шаг роадмапа темы, к которому относится эта попытка (id шага из Topic.roadmap)
+  stepId: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
 });
 
 module.exports = Quiz;

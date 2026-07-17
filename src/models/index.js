@@ -18,6 +18,8 @@ const StudentLessonLog = require('./StudentLessonLog');
 const StudentNote = require('./StudentNote');
 const Notification = require('./Notification');
 const Topic = require('./Topic');
+const TrackCard = require('./TrackCard');
+const TrackSource = require('./TrackSource');
 
 // Group ↔ User (teacher)
 Group.belongsTo(User, { foreignKey: 'teacherId', as: 'teacher' });
@@ -108,6 +110,15 @@ Topic.belongsTo(User, { foreignKey: 'userId', as: 'owner' });
 Topic.hasMany(Quiz, { foreignKey: 'topicId', as: 'attemptsList' });
 Quiz.belongsTo(Topic, { foreignKey: 'topicId', as: 'topicRef' });
 
+// TrackCard ↔ Topic (карточки трека, каскад при удалении темы) / User (владелец)
+Topic.hasMany(TrackCard, { foreignKey: 'topicId', as: 'cards', onDelete: 'CASCADE' });
+TrackCard.belongsTo(Topic, { foreignKey: 'topicId', as: 'topic' });
+TrackCard.belongsTo(User, { foreignKey: 'userId', as: 'owner' });
+
+// TrackSource ↔ Topic (источники к шагам трека, каскад)
+Topic.hasMany(TrackSource, { foreignKey: 'topicId', as: 'sources', onDelete: 'CASCADE' });
+TrackSource.belongsTo(Topic, { foreignKey: 'topicId', as: 'topic' });
+
 module.exports = {
   User,
   Group,
@@ -129,4 +140,6 @@ module.exports = {
   StudentNote,
   Notification,
   Topic,
+  TrackCard,
+  TrackSource,
 };

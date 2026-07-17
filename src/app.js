@@ -37,6 +37,11 @@ app.use(cors({
   credentials: true,
 }));
 
+// Paddle webhook — тело нужно RAW (для проверки подписи), поэтому ДО express.json
+app.post('/api/v1/billing/webhook',
+  express.raw({ type: '*/*', limit: '512kb' }),
+  require('./controllers/billing.controller').webhook);
+
 // Ограничиваем размер JSON-payload (materials/lessonLink — обычно мелкие)
 app.use(express.json({ limit: '256kb' }));
 
@@ -145,6 +150,7 @@ app.use('/api/v1/notes',              require('./routes/studentNote.routes'));
 app.use('/api/v1/materials',          require('./routes/materials.routes'));
 app.use('/api/v1/notifications',      require('./routes/notification.routes'));
 app.use('/api/v1/topics',             require('./routes/topic.routes'));
+app.use('/api/v1/study',              require('./routes/study.routes'));
 
 // Глобальный обработчик ошибок
 app.use((err, req, res, next) => {

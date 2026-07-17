@@ -5,6 +5,14 @@
 - 🔴 Критическая проблема
 - 🟡 Есть, но с проблемой
 
+> **📦 Актуально 2026-07-14:** Все 9 модулей + экосистема ученика (support/vocab/lesson-logs/notes/notifications/topics) готовы. **Локализация (i18n) — на фронте** (ru/en/pl/uk, фазы 0–3); бэк-часть — только будущее (`User.locale` + локализация писем, опц. фаза 6). **Инфра:** БД → **Neon** (Railway trial истёк; хостинг бэка решается), SSL авто по адресу БД (`neon.tech`/`railway`/`supabase`). Фикс миграции `Homework` (была `Homeworks`) — чистый `db:migrate` с нуля теперь консистентен. **Учебные треки — Фаза 1 (MVP) ✅ 2026-07-14:** `Topic` +`goal`+`roadmap` (JSONB-шаги), `Quiz` +`stepId`; `generateRoadmap` (AI, фолбэк 1 шаг); `GET /topics/:id` + `next`/`attempt` по шагу (EMA по подтеме); `GET /quizzes` исключает topic-практики. Спец `LEARNING-TRACKS.md`. Фазы 2–4 ждут команды.
+> **⚠️ Прод-миграции прогнать на Neon:** `20260710000001..0005`, `20260711000001`, `20260712000001`, `20260712000002`, `20260714000001` (topics-roadmap), `20260714000002` (track-cards), `20260715000001` (track-sources), `20260716000001` (paddle-fields на User).
+> **Подписки Paddle (2026-07-16, sandbox):** `User` +paddleCustomerId/paddleSubscriptionId/subscriptionStatus; `services/paddle.js` (проверка подписи вебхука + map price→plan); `billing.controller` webhook (`POST /billing/webhook`, raw-body до json); фронт — Paddle.js overlay на `/plans`. Полный цикл проверен в sandbox через ngrok (оплата → вебхук → plan=pro). Прод: сменить URL вебхука на домен + Production-ключи + верификация Paddle-аккаунта. Осталось: enforce лимитов Free, отмена/портал подписки, School-цена.
+> **Учебные треки Фаза 2 (заход 1, 2026-07-14):** флеш-карточки шага + SR-повторение — модель `TrackCard`, `generateFlashcards` (AI), эндпоинты `/topics/:id/cards*`, SR-формула вынесена в `utils/sr.js` (общая со словарём).
+> **Учебные треки Фаза 2 (заход 2, 2026-07-15):** ежедневная сессия — `study.controller` + `/study/session` (агрегат due-карточек всех треков + словаря) + `/study/review` (единый SR-диспетчер card/vocab). Роут `/study` смонтирован.
+> **Учебные треки Фаза 2 (заход 3, 2026-07-15):** открытый ответ с ИИ-оценкой — `aiQuiz.gradeOpenAnswers`, `next` принимает `type` (single/open), `POST /topics/:id/grade-open` (оценка+сохранение попытки `type=open`+EMA). EMA-логика вынесена в общий `applyStepResult` (used by attempt+gradeOpen).
+> **Учебные треки Фаза 2 ЗАВЕРШЕНА (заход 4, 2026-07-15):** слабые места (`GET /study/weak-spots`), проверенные источники (`POST /topics/:id/sources` — `aiQuiz.suggestSources` + `utils/verifySources` Google Books/HEAD), импорт из текста (`POST /topics/:id/cards/from-text` — `generateFlashcardsFromText`; PDF опц.), напоминания (`reminderService.remindDueReviews` в кроне → `review_due` уведомление), карта знаний (frontend). Все проверены e2e.
+
 ---
 
 ## Инфраструктура ✅
