@@ -1,8 +1,10 @@
 const { generateQuiz } = require('../services/aiQuiz');
+const { enforceAi } = require('../utils/aiLimit');
 
-// POST /ai/quiz — сгенерировать тест по теме (только учитель).
+// POST /ai/quiz — сгенерировать тест по теме (обе роли). Дневной лимит ИИ по роли/тарифу.
 const quiz = async (req, res) => {
   try {
+    if (await enforceAi(res, req.user.id, req.user.role)) return;
     const questions = await generateQuiz(req.body);
     res.json({ data: { ...req.body, questions } });
   } catch (err) {

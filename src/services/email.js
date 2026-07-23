@@ -13,7 +13,7 @@ const verificationTemplate = (name, verifyUrl) => `
 <html lang="ru">
 <head>
   <meta charset="utf-8" />
-  <title>Подтвердите email — LinguaFlow</title>
+  <title>Подтвердите email — Diklaro</title>
 </head>
 <body style="margin:0; padding:0; background:#0F1629; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
   <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:#0F1629;">
@@ -26,7 +26,7 @@ const verificationTemplate = (name, verifyUrl) => `
               <h1 style="color:white; font-size:24px; font-weight:600; margin:16px 0 8px;">Подтвердите ваш email</h1>
               <p style="color:#94a3b8; font-size:14px; line-height:1.6; margin:0;">
                 Привет, ${name}!<br/>
-                Спасибо за регистрацию в LinguaFlow. Подтвердите email чтобы получить полный доступ.
+                Спасибо за регистрацию в Diklaro. Подтвердите email чтобы получить полный доступ.
               </p>
             </td>
           </tr>
@@ -44,7 +44,7 @@ const verificationTemplate = (name, verifyUrl) => `
           <tr>
             <td style="padding:20px 32px; background:rgba(255,255,255,0.02); border-top:1px solid rgba(255,255,255,0.06); text-align:center;">
               <p style="color:#475569; font-size:11px; margin:0;">
-                Если вы не регистрировались в LinguaFlow, просто проигнорируйте это письмо.
+                Если вы не регистрировались в Diklaro, просто проигнорируйте это письмо.
               </p>
             </td>
           </tr>
@@ -79,7 +79,7 @@ const sendVerificationEmail = async (to, name, token) => {
   const result = await resend.emails.send({
     from: FROM,
     to,
-    subject: 'Подтвердите email — LinguaFlow',
+    subject: 'Подтвердите email — Diklaro',
     html: verificationTemplate(name, verifyUrl),
   });
 
@@ -119,7 +119,7 @@ const sendPasswordResetEmail = async (to, name, token) => {
   const result = await resend.emails.send({
     from: FROM,
     to,
-    subject: 'Сброс пароля — LinguaFlow',
+    subject: 'Сброс пароля — Diklaro',
     html: `
 <div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif; max-width:520px; margin:0 auto; padding:24px;">
   <h2 style="color:#0F172A;">Сброс пароля</h2>
@@ -162,7 +162,7 @@ const sendLessonRequestEmail = async (to, teacherName, studentName, language) =>
   const result = await resend.emails.send({
     from: FROM,
     to,
-    subject: 'Новая заявка на обучение — LinguaFlow',
+    subject: 'Новая заявка на обучение — Diklaro',
     html: `
 <div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif; max-width:520px; margin:0 auto; padding:24px;">
   <h2 style="color:#141D35;">Новая заявка на обучение</h2>
@@ -190,7 +190,7 @@ const sendLessonReminderEmail = async (to, studentName, { date, time, topic, les
   const result = await resend.emails.send({
     from: FROM,
     to,
-    subject: `Напоминание: урок завтра ${date} ${time} — LinguaFlow`,
+    subject: `Напоминание: урок завтра ${date} ${time} — Diklaro`,
     html: `
 <div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif; max-width:520px; margin:0 auto; padding:24px;">
   <h2 style="color:#0F172A;">Урок завтра 📅</h2>
@@ -223,7 +223,7 @@ const sendHomeworkReminderEmail = async (to, studentName, { description, deadlin
   const result = await resend.emails.send({
     from: FROM,
     to,
-    subject: `Напоминание: дедлайн ДЗ завтра — LinguaFlow`,
+    subject: `Напоминание: дедлайн ДЗ завтра — Diklaro`,
     html: `
 <div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif; max-width:520px; margin:0 auto; padding:24px;">
   <h2 style="color:#0F172A;">Дедлайн домашнего задания завтра ⏰</h2>
@@ -262,7 +262,7 @@ const sendSupportReplyEmail = async (to, name, { subject, reply }) => {
   const result = await resend.emails.send({
     from: FROM,
     to,
-    subject: `Ответ на ваше обращение: ${subject} — LinguaFlow`,
+    subject: `Ответ на ваше обращение: ${subject} — Diklaro`,
     html: `
 <div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif; max-width:520px; margin:0 auto; padding:24px;">
   <h2 style="color:#0F172A;">Ответ службы поддержки</h2>

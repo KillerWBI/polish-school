@@ -48,4 +48,9 @@ const cardsFromText = z.object({
   count:  z.number().int().min(4).max(20).optional(),
 });
 
-module.exports = { createTopic, submitAttempt, generateCards, reviewCard, gradeOpen, sourcesReq, cardsFromText };
+// PATCH /topics/:id/share — поделиться треком с учителем / отозвать
+const shareTopic = z.object({
+  shared: z.boolean(),
+});
+
+module.exports = { createTopic, submitAttempt, generateCards, reviewCard, gradeOpen, sourcesReq, cardsFromText, shareTopic };

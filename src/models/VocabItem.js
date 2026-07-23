@@ -17,6 +17,10 @@ const VocabItem = sequelize.define('VocabItem', {
   word:        { type: DataTypes.STRING, allowNull: false },
   translation: { type: DataTypes.STRING, allowNull: false },
   example:     { type: DataTypes.TEXT, allowNull: true },
+  // Язык изучаемого слова и язык перевода (родной) — ISO-коды 'en'/'pl'/'uk'…
+  // Нужны для фильтра словаря по языку. null — старые слова (до этой фичи).
+  language:       { type: DataTypes.STRING, allowNull: true },
+  nativeLanguage: { type: DataTypes.STRING, allowNull: true },
   // Статус освоения
   status: {
     type: DataTypes.ENUM('new', 'learning', 'known'),

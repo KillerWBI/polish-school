@@ -1,7 +1,9 @@
 const crypto = require('crypto');
-const { Topic, Quiz, TrackSource } = require('../models');
+const { Topic, Quiz, TrackSource, User } = require('../models');
 const { generateQuiz, generateRoadmap, gradeOpenAnswers, suggestSources } = require('../services/aiQuiz');
 const { verifySources } = require('../utils/verifySources');
+const { overLimit } = require('../config/planLimits');
+const { enforceAi } = require('../utils/aiLimit');
 
 // Вес сложности: на лёгких тестах потолок обладания ниже, 100% — только на сложных.
 const DIFFICULTY_WEIGHT = { easy: 0.6, medium: 0.8, hard: 1.0 };
@@ -84,6 +86,12 @@ const create = async (req, res) => {
   try {
     const { title, subject } = req.body;
 
+    // Лимит числа треков + дневной лимит ИИ
+    const me = await User.findByPk(req.user.id, { attributes: ['plan'] });
+    const tracks = await Topic.count({ where: { userId: req.user.id } });
+    if (overLimit(res, 'student', me?.plan, 'tracks', tracks)) return;
+    if (await enforceAi(res, req.user.id, 'student')) return;
+
     let goal = null;
     let steps = [];
     try {
@@ -118,6 +126,20 @@ const create = async (req, res) => {
   }
 };
 
+// PATCH /topics/:id/share — ученик делится треком с учителем (или отзывает доступ).
+// Расшаренный трек виден учителю в разделе слабых мест ученика (Фаза 3).
+const share = async (req, res) => {
+  try {
+    const topic = await Topic.findOne({ where: { id: req.params.id, userId: req.user.id } });
+    if (!topic) return res.status(404).json({ error: 'Тема не найдена' });
+    await topic.update({ sharedWithTeacher: !!req.body.shared });
+    res.json({ data: { id: topic.id, sharedWithTeacher: topic.sharedWithTeacher } });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Ошибка обновления доступа' });
+  }
+};
+
 // DELETE /topics/:id — удалить тему (её попытки удалятся каскадом по FK)
 const remove = async (req, res) => {
   try {
@@ -142,6 +164,8 @@ const next = async (req, res) => {
     const type = req.body?.type === 'open' ? 'open' : 'single'; // тип практики: тест или открытый ответ
     const step = findStep(topic.roadmap, stepId);
     if (!step) return res.status(400).json({ error: 'Шаг не найден' });
+
+    if (await enforceAi(res, req.user.id, 'student')) return; // дневной лимит ИИ
 
     const difficulty = difficultyForMastery(Number(step.mastery) || 0);
 
@@ -221,6 +245,8 @@ const gradeOpen = async (req, res) => {
     const qs = Array.isArray(questions) ? questions : [];
     if (!qs.length) return res.status(400).json({ error: 'Нет вопросов' });
 
+    if (await enforceAi(res, req.user.id, 'student')) return; // дневной лимит ИИ
+
     const quizTopic = step.title === topic.title ? topic.title : `${topic.title} — ${step.title}`;
     const items = qs.map((q, i) => ({
       question: q.question,
@@ -291,6 +317,8 @@ const sources = async (req, res) => {
     const avoid = existing.flatMap((s) => [s.title, s.url].filter(Boolean));
     const existingKeys = new Set(existing.map((s) => (s.url || s.title).toLowerCase()));
 
+    if (await enforceAi(res, req.user.id, 'student')) return; // дневной лимит ИИ
+
     const title = step.title === topic.title ? topic.title : `${topic.title} — ${step.title}`;
     const suggested = await suggestSources({ title, subject: topic.subject, language: 'русский', avoid });
     const checked = await verifySources(suggested, { loose: !!loose });
@@ -333,4 +361,4 @@ const removeSource = async (req, res) => {
   }
 };
 
-module.exports = { list, getOne, create, remove, next, attempt, gradeOpen, sources, sourcesList, removeSource };
+module.exports = { list, getOne, create, remove, share, next, attempt, gradeOpen, sources, sourcesList, removeSource };
