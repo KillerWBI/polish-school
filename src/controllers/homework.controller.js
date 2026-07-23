@@ -98,6 +98,8 @@ const getAll = async (req, res) => {
       return res.json({ data: [], pagination: { page, limit, total: 0, pages: 0 } });
     }
 
+    const where = { [Op.or]: orConditions };
+
     // Прикреплённый тест (обе роли видят). Студенту — ещё его сдачу (для статуса).
     const myStudentIds = req.user.role === 'student' ? await getStudentIdsForUser(req.user.id) : [];
     const include = [{ model: Quiz, as: 'quiz', attributes: ['id', 'topic', 'type', 'questions'] }];
@@ -105,13 +107,13 @@ const getAll = async (req, res) => {
       include.push({ model: HomeworkSubmission, required: false, where: { studentId: myStudentIds } });
     }
 
-    const { count, rows } = await Homework.findAndCountAll({
-      where: { [Op.or]: orConditions },
-      include,
-      distinct: true,
-      limit,
-      offset,
-    });
+    // rows и count — параллельно. count без include = быстрый индексный COUNT
+    // (вместо COUNT(DISTINCT … JOIN) внутри findAndCountAll). Дублей строк нет:
+    // quiz — belongsTo (1), сдача студента — ≤1 на ДЗ (unique homeworkId+studentId).
+    const [rows, count] = await Promise.all([
+      Homework.findAll({ where, include, limit, offset, subQuery: false }),
+      Homework.count({ where }),
+    ]);
     res.json({ data: rows, pagination: { page, limit, total: count, pages: Math.ceil(count / limit) } });
   } catch (err) {
     console.error(err);
