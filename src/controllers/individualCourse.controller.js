@@ -1,6 +1,7 @@
 const { IndividualCourse, User, TeacherStudent, Student } = require('../models');
 const { generateIndividualLessons } = require('../utils/lessonGenerator');
 const { getStudentIdsForUser, resolveStudent, createPlaceholder } = require('../utils/students');
+const { overLimit } = require('../config/planLimits');
 
 // Ученик курса (Student.id) — чтобы фронт показывал имя (getStudent по /users/:id не годится: там User)
 const studentInclude = { model: Student, as: 'student', attributes: ['id', 'name', 'userId'] };
@@ -21,6 +22,11 @@ const getAll = async (req, res) => {
 const create = async (req, res) => {
   try {
     const { studentId, placeholder, name, schedule, lessonLink, pricePerLesson } = req.body;
+
+    // Лимит тарифа на число индивидуальных курсов
+    const me = await User.findByPk(req.user.id, { attributes: ['plan'] });
+    const usedCourses = await IndividualCourse.count({ where: { teacherId: req.user.id } });
+    if (overLimit(res, 'teacher', me?.plan, 'courses', usedCourses)) return;
 
     // Ученик курса — заглушка (placeholder) ИЛИ реальный аккаунт (studentId)
     let student;

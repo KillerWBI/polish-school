@@ -14,6 +14,7 @@ const reviewItem = z.object({
 
 router.get('/session',    auth, isStudent, ctrl.session);
 router.get('/weak-spots', auth, isStudent, ctrl.weakSpots);
+router.get('/ai-usage',   auth, isStudent, ctrl.aiUsageStatus);
 router.post('/review',    auth, isStudent, validate(reviewItem), ctrl.review);
 
 module.exports = router;

@@ -1,5 +1,5 @@
 const router = require('express').Router();
-const { createVocab, updateVocab, reviewVocab } = require('../schemas/vocab.schema');
+const { createVocab, updateVocab, reviewVocab, bulkVocab, generateVocabReq } = require('../schemas/vocab.schema');
 const { validate } = require('../middleware/validate');
 const auth = require('../middleware/auth');
 const { isStudent } = require('../middleware/role');
@@ -9,6 +9,8 @@ const ctrl = require('../controllers/vocab.controller');
 router.get('/',            auth, isStudent, ctrl.list);
 router.get('/due',         auth, isStudent, ctrl.due);
 router.post('/',           auth, isStudent, validate(createVocab), ctrl.create);
+router.post('/bulk',       auth, isStudent, validate(bulkVocab), ctrl.bulkCreate);        // массовая вставка
+router.post('/generate',   auth, isStudent, validate(generateVocabReq), ctrl.generate);   // AI-генерация набора
 router.put('/:id',         auth, isStudent, validate(updateVocab), ctrl.update);
 router.patch('/:id/review', auth, isStudent, validate(reviewVocab), ctrl.review);
 router.delete('/:id',      auth, isStudent, ctrl.remove);

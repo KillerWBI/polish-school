@@ -41,6 +41,9 @@ const User = sequelize.define('User', {
   paddleCustomerId:     { type: DataTypes.STRING, allowNull: true },
   paddleSubscriptionId: { type: DataTypes.STRING, allowNull: true },
   subscriptionStatus:   { type: DataTypes.STRING, allowNull: true }, // active/trialing/past_due/canceled…
+  // Дневной лимит ИИ-запросов: дата (YYYY-MM-DD) + счётчик за этот день
+  aiUsageDate:  { type: DataTypes.STRING, allowNull: true },
+  aiUsageCount: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
   // Email verification (Resend)
   emailVerified: {
     type: DataTypes.BOOLEAN,

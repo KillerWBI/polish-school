@@ -1,5 +1,5 @@
 const router = require('express').Router();
-const { createTopic, submitAttempt, generateCards, reviewCard, gradeOpen, sourcesReq, cardsFromText } = require('../schemas/topic.schema');
+const { createTopic, submitAttempt, generateCards, reviewCard, gradeOpen, sourcesReq, cardsFromText, shareTopic } = require('../schemas/topic.schema');
 const { validate } = require('../middleware/validate');
 const auth = require('../middleware/auth');
 const { isStudent } = require('../middleware/role');
@@ -11,6 +11,7 @@ router.get('/',             auth, isStudent, ctrl.list);
 router.get('/:id',          auth, isStudent, ctrl.getOne);
 router.post('/',            auth, isStudent, validate(createTopic), ctrl.create);
 router.delete('/:id',       auth, isStudent, ctrl.remove);
+router.patch('/:id/share',  auth, isStudent, validate(shareTopic), ctrl.share);
 router.post('/:id/next',    auth, isStudent, ctrl.next);
 router.post('/:id/attempt', auth, isStudent, validate(submitAttempt), ctrl.attempt);
 router.post('/:id/grade-open', auth, isStudent, validate(gradeOpen), ctrl.gradeOpen);

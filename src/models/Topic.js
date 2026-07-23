@@ -38,6 +38,12 @@ const Topic = sequelize.define('Topic', {
     defaultValue: 0,
   },
   lastPracticedAt: { type: DataTypes.DATE, allowNull: true },
+  // Фаза 3: ученик поделился треком с учителем → учитель видит слабые места и генерит адресный тест
+  sharedWithTeacher: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: false,
+  },
 });
 
 module.exports = Topic;

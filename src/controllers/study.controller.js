@@ -1,6 +1,17 @@
 const { Op } = require('sequelize');
 const { TrackCard, VocabItem, Topic } = require('../models');
 const { computeSr } = require('../utils/sr');
+const { aiUsage } = require('../utils/aiLimit');
+
+// GET /study/ai-usage — остаток дневного лимита ИИ-запросов
+const aiUsageStatus = async (req, res) => {
+  try {
+    res.json({ data: await aiUsage(req.user.id, req.user.role) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Ошибка получения лимита' });
+  }
+};
 
 // GET /study/weak-spots — слабые места: практикованные шаги с низким обладанием (по всем трекам)
 const weakSpots = async (req, res) => {
@@ -87,4 +98,4 @@ const review = async (req, res) => {
   }
 };
 
-module.exports = { session, review, weakSpots };
+module.exports = { session, review, weakSpots, aiUsageStatus };

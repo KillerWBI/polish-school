@@ -40,7 +40,7 @@ const verifyLink = async ({ title, url }) => {
     // GET надёжнее HEAD: многие серверы отдают неверный статус на HEAD.
     const resp = await fetchTimeout(url, {
       method: 'GET',
-      headers: { 'user-agent': 'Mozilla/5.0 (compatible; LinguaFlowBot/1.0)' },
+      headers: { 'user-agent': 'Mozilla/5.0 (compatible; DiklaroBot/1.0)' },
     });
     if (resp.status >= 400) return null;
     // финальный URL после редиректов — чтобы не сохранить ссылку, ведущую на страницу-заглушку

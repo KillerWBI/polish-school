@@ -2,6 +2,7 @@ const { Op } = require('sequelize');
 const { Topic, TrackCard } = require('../models');
 const { generateFlashcards, generateFlashcardsFromText } = require('../services/aiQuiz');
 const { computeSr } = require('../utils/sr');
+const { enforceAi } = require('../utils/aiLimit');
 
 // Проверка, что трек принадлежит текущему ученику
 const findOwnTopic = (topicId, userId) =>
@@ -19,6 +20,8 @@ const generate = async (req, res) => {
     const { stepId, count } = req.body;
     const step = findStep(topic.roadmap, stepId);
     if (!step) return res.status(400).json({ error: 'Шаг не найден' });
+
+    if (await enforceAi(res, req.user.id, 'student')) return; // дневной лимит ИИ
 
     const n = Math.min(15, Math.max(4, parseInt(count) || 8));
     const cardTopic = step.title === topic.title ? topic.title : `${topic.title} — ${step.title}`;
@@ -61,6 +64,8 @@ const fromText = async (req, res) => {
     if (!text || String(text).trim().length < 30) {
       return res.status(400).json({ error: 'Вставьте текст (хотя бы пару предложений)' });
     }
+
+    if (await enforceAi(res, req.user.id, 'student')) return; // дневной лимит ИИ
 
     const n = Math.min(20, Math.max(4, parseInt(count) || 10));
     const cards = await generateFlashcardsFromText({ text, language: 'русский', count: n });

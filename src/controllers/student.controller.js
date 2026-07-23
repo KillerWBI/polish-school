@@ -1,7 +1,9 @@
 const sequelize = require('../config/database');
 const { QueryTypes } = require('sequelize');
-const { Student, VocabItem, StudentLessonLog } = require('../models');
+const { Student, VocabItem, StudentLessonLog, Topic, Quiz } = require('../models');
 const { getStudentIdsForUser } = require('../utils/students');
+const { generateQuiz } = require('../services/aiQuiz');
+const { enforceAi } = require('../utils/aiLimit');
 // FK = список 6 таблиц, где лежит ученик (см. studentFkRegistry.js). Каждый элемент —
 // объект { table:'Attendances', column:'studentId', uniqueWith:[...] }. Это и есть «где искать ученика».
 const FK = require('../utils/studentFkRegistry');
@@ -201,4 +203,118 @@ const getMyProgress = async (req, res) => {
   }
 };
 
-module.exports = { merge, remove, getMyProgress };
+// ── Фаза 3: двусторонность (учитель видит слабые места ученика → адресный тест) ──
+
+const WEAK_THRESHOLD = 70; // порог «слабого» обладания шагом
+
+// Практикованные шаги трека с обладанием ниже порога
+const weakStepsOf = (roadmap) =>
+  (Array.isArray(roadmap) ? roadmap : []).filter(
+    (s) => (s.attempts || 0) > 0 && (Number(s.mastery) || 0) < WEAK_THRESHOLD
+  );
+
+// GET /students/:id/track-insights — слабые места ученика из РАСШАРЕННЫХ им треков.
+// Учитель видит только те треки, которыми ученик поделился (sharedWithTeacher=true).
+const getTrackInsights = async (req, res) => {
+  try {
+    const teacherId = req.user.id;
+    const student = await Student.findOne({ where: { id: req.params.id, teacherId } });
+    if (!student) return res.status(404).json({ error: 'Ученик не найден' });
+    // Заглушка без аккаунта — треков нет
+    if (!student.userId) {
+      return res.json({ data: { spots: [], meta: { hasAccount: false, sharing: false, sharedCount: 0, totalTracks: 0 } } });
+    }
+
+    const [shared, totalTracks] = await Promise.all([
+      Topic.findAll({
+        where: { userId: student.userId, sharedWithTeacher: true },
+        attributes: ['id', 'title', 'roadmap'],
+      }),
+      Topic.count({ where: { userId: student.userId } }),
+    ]);
+
+    const spots = [];
+    for (const t of shared) {
+      for (const step of weakStepsOf(t.roadmap)) {
+        spots.push({
+          topicId: t.id, topicTitle: t.title,
+          stepId: step.id, stepTitle: step.title,
+          mastery: Math.round(Number(step.mastery) || 0), attempts: step.attempts || 0,
+        });
+      }
+    }
+    spots.sort((a, b) => a.mastery - b.mastery); // слабейшие первыми
+
+    res.json({
+      data: {
+        spots: spots.slice(0, 30),
+        meta: { hasAccount: true, sharing: shared.length > 0, sharedCount: shared.length, totalTracks },
+      },
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Ошибка получения слабых мест ученика' });
+  }
+};
+
+// POST /students/:id/targeted-quiz — AI-тест по выбранным слабым подтемам → в библиотеку тестов учителя.
+// Body { spots: [{ topicId, stepTitle }], count? }. Подтемы разрешены только из расшаренных учеником треков.
+// Готовый тест учитель прикрепляет к ДЗ обычным флоу (Homework.quizId).
+const generateTargetedQuiz = async (req, res) => {
+  try {
+    const teacherId = req.user.id;
+    const student = await Student.findOne({ where: { id: req.params.id, teacherId } });
+    if (!student) return res.status(404).json({ error: 'Ученик не найден' });
+    if (!student.userId) return res.status(400).json({ error: 'У ученика нет аккаунта' });
+
+    const picked = Array.isArray(req.body.spots) ? req.body.spots : [];
+    if (!picked.length) return res.status(400).json({ error: 'Не выбраны слабые места' });
+
+    // Разрешены только подтемы из расшаренных этим учеником треков
+    const shared = await Topic.findAll({
+      where: { userId: student.userId, sharedWithTeacher: true },
+      attributes: ['id', 'title', 'roadmap'],
+    });
+    const allowed = new Map(shared.map((t) => [t.id, t]));
+
+    const subtitles = [];
+    for (const s of picked) {
+      const t = allowed.get(s.topicId);
+      if (!t) continue;
+      const step = (Array.isArray(t.roadmap) ? t.roadmap : []).find((st) => st.title === s.stepTitle);
+      if (step) subtitles.push(`${t.title} — ${step.title}`);
+    }
+    if (!subtitles.length) return res.status(400).json({ error: 'Выбранные темы недоступны' });
+
+    if (await enforceAi(res, teacherId, 'teacher')) return; // дневной лимит ИИ
+
+    const count = Math.min(Math.max(Number(req.body.count) || 6, 3), 12);
+    const questions = await generateQuiz({
+      topic: subtitles.join('; '),
+      count,
+      difficulty: 'medium',
+      type: 'single',
+      language: 'русский',
+    });
+
+    const label = `Слабые места: ${subtitles.slice(0, 6).join('; ')}`;
+    const quiz = await Quiz.create({
+      teacherId,
+      topic: label.slice(0, 255),
+      type: 'single',
+      difficulty: 'medium',
+      language: 'русский',
+      questions,
+    });
+
+    res.status(201).json({ data: quiz });
+  } catch (err) {
+    if (err.code === 'NO_AI_KEY') {
+      return res.status(503).json({ error: 'AI не настроен: добавьте AI_API_KEY в .env бэкенда' });
+    }
+    console.error('generateTargetedQuiz:', err.message);
+    res.status(502).json({ error: err.message || 'Не удалось сгенерировать тест' });
+  }
+};
+
+module.exports = { merge, remove, getMyProgress, getTrackInsights, generateTargetedQuiz };

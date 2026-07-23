@@ -191,4 +191,63 @@ ${avoidBlock}Верни СТРОГО валидный JSON без markdown по 
   };
 };
 
-module.exports = { generateQuiz, generateRoadmap, generateFlashcards, generateFlashcardsFromText, gradeOpenAnswers, suggestSources };
+// Подсказка по уровню для промпта: под какой уровень подбирать лексику.
+const LEVEL_HINT = {
+  beginner:     'начальный уровень (A1–A2): частотные, базовые, повседневные слова',
+  intermediate: 'средний уровень (B1–B2): слова средней частотности, полезные в живой речи',
+  advanced:     'продвинутый уровень (C1–C2): более редкие, точные, продвинутые слова',
+};
+
+// Сгенерировать НАБОР слов для изучения языка.
+//   language       — ISO-код изучаемого языка (слова будут на нём), напр. 'pl'
+//   nativeLanguage — ISO-код родного (перевод будет на нём), напр. 'ru'
+//   topic          — тема набора («еда», «для работы официантом», «школа»…)
+//   count          — сколько слов (1..100)
+//   level          — beginner|intermediate|advanced
+//   avoid          — слова, которые уже есть у ученика (не повторять их)
+// Возвращает нормализованный массив [{ word, translation, example }].
+const generateVocab = async ({ language, nativeLanguage, topic, count = 20, level = 'beginner', avoid = [] }) => {
+  const n = Math.min(100, Math.max(1, Number(count) || 20)); // страхуемся: держим 1..100
+  const levelHint = LEVEL_HINT[level] || LEVEL_HINT.beginner;
+
+  // Блок анти-повтора: список уже существующих слов, чтобы ИИ дал НОВЫЕ. Ограничиваем 300 (объём промпта).
+  const avoidBlock = Array.isArray(avoid) && avoid.length
+    ? `\nЭти слова у ученика УЖЕ ЕСТЬ — не повторяй их, дай другие:\n${avoid.slice(0, 300).join(', ')}\n`
+    : '';
+
+  const prompt = `Подбери набор слов для изучения языка.
+Язык слов (ISO-код): "${language}" — ВСЕ слова строго на этом языке.
+Язык перевода (ISO-код): "${nativeLanguage}" — перевод каждого слова на этот язык.
+Тема набора: "${topic}".
+Уровень: ${levelHint}.
+Количество слов: ровно ${n} (без повторов, разные слова по теме).
+Для каждого слова добавь короткий пример-предложение на языке "${language}" (естественное употребление слова).
+${avoidBlock}Верни СТРОГО валидный JSON без markdown, без текста вокруг, по схеме:
+{"words":[{"word":"...","translation":"...","example":"..."}]}
+Ничего, кроме JSON, не выводи.`;
+
+  // maxTokens растёт с числом слов (каждое слово + перевод + пример ≈ 55 токенов).
+  // Модель изредка возвращает битый JSON — делаем одну повторную попытку (кроме случая «нет ключа»).
+  const opts = { user: prompt, maxTokens: Math.min(8000, 400 + n * 60), temperature: 0.4 };
+  let parsed;
+  try {
+    parsed = await chatJSON(opts);
+  } catch (e) {
+    if (e.code === 'NO_AI_KEY') throw e; // отсутствие ключа ретраить бессмысленно
+    parsed = await chatJSON(opts);       // вторая попытка на случай кривого JSON
+  }
+
+  const words = (Array.isArray(parsed.words) ? parsed.words : [])
+    .map((w) => ({
+      word:        String(w.word || '').trim(),
+      translation: String(w.translation || '').trim(),
+      example:     String(w.example || '').trim() || null, // пустой пример → null
+    }))
+    .filter((w) => w.word && w.translation) // выкидываем неполные пары
+    .slice(0, n);                           // не больше запрошенного
+
+  if (!words.length) throw new Error('AI вернул пустой набор слов');
+  return words;
+};
+
+module.exports = { generateQuiz, generateRoadmap, generateFlashcards, generateFlashcardsFromText, gradeOpenAnswers, suggestSources, generateVocab };
