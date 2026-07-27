@@ -2,7 +2,7 @@ const { z } = require('zod');
 
 const placeholderSchema = z.object({
   name:    z.string().trim().min(1, 'Имя заглушки обязательно'),
-  contact: z.string().trim().max(200).optional(),
+  contact: z.string().trim().max(200).nullish(),
 });
 
 // POST /individual-courses — создание курса
