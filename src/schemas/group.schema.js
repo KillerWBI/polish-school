@@ -10,8 +10,8 @@ const scheduleSlot = z.object({
 const createGroup = z.object({
   name:           z.string().trim().min(1, 'Название обязательно'),
   schedule:       z.array(scheduleSlot).optional(),
-  lessonLink:     z.string().trim().optional(),
-  chatLink:       z.string().trim().optional(),
+  lessonLink:     z.string().trim().nullish(),
+  chatLink:       z.string().trim().nullish(),
   pricePerLesson: z.coerce.number().min(0, 'Цена не может быть отрицательной').optional(),
 });
 
@@ -19,8 +19,8 @@ const createGroup = z.object({
 const updateGroup = z.object({
   name:           z.string().trim().min(1, 'Название не может быть пустым').optional(),
   schedule:       z.array(scheduleSlot).optional(),
-  lessonLink:     z.string().trim().optional(),
-  chatLink:       z.string().trim().optional(),
+  lessonLink:     z.string().trim().nullish(),
+  chatLink:       z.string().trim().nullish(),
   pricePerLesson: z.coerce.number().min(0, 'Цена не может быть отрицательной').optional(),
 });
 
@@ -32,7 +32,7 @@ const addStudent = z.object({
 // POST /groups/:id/placeholder — добавить заглушку (ученик без аккаунта)
 const addPlaceholder = z.object({
   name:    z.string().trim().min(1, 'Имя обязательно'),
-  contact: z.string().trim().optional(),
+  contact: z.string().trim().nullish(),
 });
 
 module.exports = { createGroup, updateGroup, addStudent, addPlaceholder };
