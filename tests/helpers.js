@@ -2,6 +2,7 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const request = require('supertest');
 const app = require('../src/app');
+require('./db'); // подключение к тест-БД + чистая схема (только для тестов с базой)
 const sequelize = require('../src/config/database');
 const {
   User, Student, TeacherStudent, Group, GroupStudent, Lesson, Attendance, PaymentRecord,

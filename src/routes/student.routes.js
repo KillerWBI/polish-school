@@ -2,6 +2,7 @@ const router = require('express').Router();
 const auth = require('../middleware/auth');
 const { isTeacher, isStudent } = require('../middleware/role');
 const { validate } = require('../middleware/validate');
+const { aiRateLimit } = require('../middleware/aiRateLimit');
 const { mergeStudent, targetedQuiz } = require('../schemas/student.schema');
 const ctrl = require('../controllers/student.controller');
 
@@ -13,6 +14,6 @@ router.delete('/:id', auth, isTeacher, ctrl.remove);
 
 // Фаза 3: учитель видит слабые места ученика (из расшаренных треков) → адресный тест
 router.get('/:id/track-insights', auth, isTeacher, ctrl.getTrackInsights);
-router.post('/:id/targeted-quiz', auth, isTeacher, validate(targetedQuiz), ctrl.generateTargetedQuiz);
+router.post('/:id/targeted-quiz', auth, isTeacher, aiRateLimit, validate(targetedQuiz), ctrl.generateTargetedQuiz);
 
 module.exports = router;

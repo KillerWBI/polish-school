@@ -31,7 +31,9 @@ const create = async (req, res) => {
     // Ученик курса — заглушка (placeholder) ИЛИ реальный аккаунт (studentId)
     let student;
     if (placeholder && placeholder.name) {
-      // Заглушка — без гейта TeacherStudent
+      // Заглушка — без гейта TeacherStudent, но под лимитом учеников (иначе он обходится)
+      const usedStudents = await Student.count({ where: { teacherId: req.user.id } });
+      if (overLimit(res, 'teacher', me?.plan, 'students', usedStudents)) return;
       student = await createPlaceholder(req.user.id, placeholder.name, placeholder.contact);
     } else {
       if (!studentId) return res.status(400).json({ error: 'Нужен studentId или placeholder' });

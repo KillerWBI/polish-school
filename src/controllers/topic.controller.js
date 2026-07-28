@@ -4,6 +4,7 @@ const { generateQuiz, generateRoadmap, gradeOpenAnswers, suggestSources } = requ
 const { verifySources } = require('../utils/verifySources');
 const { overLimit } = require('../config/planLimits');
 const { enforceAi } = require('../utils/aiLimit');
+const { scoreQuiz } = require('../utils/quizScore');
 
 // Вес сложности: на лёгких тестах потолок обладания ниже, 100% — только на сложных.
 const DIFFICULTY_WEIGHT = { easy: 0.6, medium: 0.8, hard: 1.0 };
@@ -210,9 +211,13 @@ const attempt = async (req, res) => {
     const topic = await Topic.findOne({ where: { id: req.params.id, userId: req.user.id } });
     if (!topic) return res.status(404).json({ error: 'Тема не найдена' });
 
-    const { stepId, questions, answers, score, total, difficulty } = req.body;
-    if (score > total) return res.status(400).json({ error: 'score не может превышать total' });
+    const { stepId, questions, answers, difficulty } = req.body;
     if (!findStep(topic.roadmap, stepId)) return res.status(400).json({ error: 'Шаг не найден' });
+
+    // Считаем результат сами по ответам — присланный клиентом score не берём:
+    // он напрямую двигает обладание темой (EMA) и виден учителю в слабых местах.
+    const { score, total } = scoreQuiz(questions, answers, 'single');
+    if (!total) return res.status(400).json({ error: 'Нет вопросов' });
 
     // Сохраняем практику как Quiz (история для анти-повтора + разбор ошибок)
     await Quiz.create({
