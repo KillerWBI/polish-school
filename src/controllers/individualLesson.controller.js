@@ -2,6 +2,7 @@ const { IndividualLesson, IndividualCourse, User, Homework, Student } = require(
 const { Op } = require('sequelize');
 const { getStudentIdsForUser, resolveStudent, createPlaceholder } = require('../utils/students');
 const { generateMeetLink } = require('../utils/meet');
+const { overLimit } = require('../config/planLimits');
 
 const studentInclude = { model: Student, as: 'student', attributes: ['id', 'name'] };
 
@@ -65,6 +66,10 @@ const create = async (req, res) => {
       if (course.teacherId !== req.user.id) return res.status(403).json({ error: 'Доступ запрещён' });
       student = { id: course.studentId }; // studentId курса — уже Student.id
     } else if (placeholder && placeholder.name) {
+      // Заглушка тоже занимает место в лимите учеников — иначе лимит обходится
+      const me = await User.findByPk(req.user.id, { attributes: ['plan'] });
+      const usedStudents = await Student.count({ where: { teacherId: req.user.id } });
+      if (overLimit(res, 'teacher', me?.plan, 'students', usedStudents)) return;
       student = await createPlaceholder(req.user.id, placeholder.name, placeholder.contact);
     } else {
       if (!studentId) return res.status(400).json({ error: 'Нужен studentId, placeholder или individualCourseId' });
@@ -98,6 +103,9 @@ const getOne = async (req, res) => {
     });
     if (!lesson) return res.status(404).json({ error: 'Урок не найден' });
 
+    if (req.user.role === 'teacher' && lesson.teacherId !== req.user.id) {
+      return res.status(403).json({ error: 'Доступ запрещён' });
+    }
     if (req.user.role === 'student') {
       const myStudentIds = await getStudentIdsForUser(req.user.id);
       if (!myStudentIds.includes(lesson.studentId)) return res.status(403).json({ error: 'Доступ запрещён' });

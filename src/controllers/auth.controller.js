@@ -162,8 +162,14 @@ const refresh = async (req, res) => {
     }
     if (payload.type !== 'refresh') return res.status(401).json({ error: 'Неверный тип токена' });
 
-    const user = await User.findByPk(payload.id, { attributes: ['id', 'role'] });
+    const user = await User.findByPk(payload.id, { attributes: ['id', 'role', 'passwordChangedAt'] });
     if (!user) return res.status(401).json({ error: 'Пользователь не найден' });
+
+    // Токены, выданные до последней смены пароля, считаются отозванными:
+    // сменил пароль → украденный 30-дневный refresh перестаёт работать.
+    if (user.passwordChangedAt && payload.iat * 1000 < new Date(user.passwordChangedAt).getTime()) {
+      return res.status(401).json({ error: 'Сессия устарела, войдите заново' });
+    }
 
     // 3) генерим НОВЫЙ access-токен (то же, что при login) — вернём его в теле
     const accessToken = signToken(user);
@@ -292,7 +298,7 @@ const changePassword = async (req, res) => {
     if (!valid) return res.status(400).json({ error: 'Текущий пароль неверен' });
 
     const hash = await bcrypt.hash(newPassword, 10);
-    await user.update({ password: hash });
+    await user.update({ password: hash, passwordChangedAt: new Date() });
 
     res.json({ data: { message: 'Пароль изменён' } });
   } catch (err) {
@@ -347,6 +353,7 @@ const resetPassword = async (req, res) => {
     const hash = await bcrypt.hash(password, 10);
     await user.update({
       password: hash,
+      passwordChangedAt: new Date(),
       passwordResetToken: null,
       passwordResetExpiresAt: null,
     });

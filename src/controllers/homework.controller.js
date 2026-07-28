@@ -4,6 +4,7 @@ const { isHwOwner } = require('../utils/ownership');
 const { getStudentIdsForUser } = require('../utils/students');
 const { isAllowedUploadUrl } = require('../utils/cloudinary');
 const { notifyMany, createNotification } = require('../utils/notify');
+const { scoreQuiz } = require('../utils/quizScore');
 
 
 
@@ -326,12 +327,14 @@ const submitQuizAttempt = async (req, res) => {
     const source = await Quiz.findByPk(hw.quizId);
     if (!source) return res.status(404).json({ error: 'Тест не найден' });
 
-    const { answers, score, total } = req.body;
+    // Результат считаем сами по вопросам из БД — присланный клиентом score игнорируем
+    const { answers } = req.body;
+    const { score, total } = scoreQuiz(source.questions, answers, source.type);
     const attempt = await Quiz.create({
       teacherId: req.user.id,               // владелец = проходивший
       topic: source.topic, type: source.type, difficulty: source.difficulty, language: source.language,
       questions: source.questions,
-      answers: answers || {}, score: score ?? null, total: total ?? null,
+      answers: answers || {}, score, total,
       homeworkId: hw.id, sourceQuizId: source.id,
     });
     res.status(201).json({ data: attempt });

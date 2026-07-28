@@ -27,6 +27,7 @@ const verifyWebhook = (rawBody, signatureHeader) => {
 // price_id -> наш тариф (задаётся в .env)
 const planForPrice = (priceId) => {
   if (!priceId) return null;
+  if (priceId === process.env.PADDLE_PRICE_BASIC) return 'basic';
   if (priceId === process.env.PADDLE_PRICE_PRO) return 'pro';
   if (priceId === process.env.PADDLE_PRICE_SCHOOL) return 'school';
   return null;

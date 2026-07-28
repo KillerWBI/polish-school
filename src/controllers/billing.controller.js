@@ -23,6 +23,13 @@ const webhook = async (req, res) => {
       user = await User.findOne({ where: { paddleCustomerId: data.customer_id } }).catch(() => null);
     }
 
+    // Вебхуки приходят не по порядку: более старое событие не должно перезаписать более новое
+    // (иначе запоздавший subscription.updated вернёт платный план уже отменённой подписке).
+    const occurredAt = event.occurred_at ? new Date(event.occurred_at) : null;
+    const isStale = user?.subscriptionEventAt && occurredAt
+      && occurredAt <= new Date(user.subscriptionEventAt);
+    if (isStale) return res.json({ received: true, skipped: 'stale' });
+
     if (['subscription.created', 'subscription.activated', 'subscription.updated', 'subscription.resumed'].includes(type)) {
       const priceId = data.items?.[0]?.price?.id;
       const plan = planForPrice(priceId);
@@ -32,13 +39,18 @@ const webhook = async (req, res) => {
           paddleCustomerId: data.customer_id || user.paddleCustomerId,
           paddleSubscriptionId: data.id || user.paddleSubscriptionId,
           subscriptionStatus: data.status || null,
+          subscriptionEventAt: occurredAt || user.subscriptionEventAt,
         });
-        console.log(`[paddle] ${user.email} → ${plan} (${data.status})`);
+        console.log(`[paddle] user ${user.id} → ${plan} (${data.status})`);
       }
     } else if (['subscription.canceled', 'subscription.paused'].includes(type)) {
       if (user) {
-        await user.update({ plan: 'free', subscriptionStatus: data.status || 'canceled' });
-        console.log(`[paddle] ${user.email} → free (${type})`);
+        await user.update({
+          plan: 'free',
+          subscriptionStatus: data.status || 'canceled',
+          subscriptionEventAt: occurredAt || user.subscriptionEventAt,
+        });
+        console.log(`[paddle] user ${user.id} → free (${type})`);
       }
     }
 

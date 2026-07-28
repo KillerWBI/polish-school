@@ -2,6 +2,7 @@ const { Op } = require('sequelize');
 const { PaymentRecord, Attendance, Lesson, IndividualLesson, Group, User, Student } = require('../models');
 const { getStudentIdsForUser, getTeacherStudentIds } = require('../utils/students');
 const { createNotification } = require('../utils/notify');
+const { isAllowedUploadUrl } = require('../utils/cloudinary');
 
 // getTeacherStudentIds — все Student.id учителя из таблицы Student (utils/students.js).
 // Раньше тут был локальный вариант через GroupStudent+IndividualCourse — он терял учеников
@@ -385,19 +386,19 @@ const getTeacherPaymentInfo = async (req, res) => {
 const studentRecordPayment = async (req, res) => {
   try {
     const userId = req.user.id;
+    // Формат/required/способ — в schemas/payment.schema.js (validate в роуте)
     const { teacherId, amount, method, screenshotUrl } = req.body;
 
-    if (!teacherId || !amount || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) {
-      return res.status(400).json({ error: 'Укажите teacherId и сумму' });
+    // Скриншот принимаем только со своего Cloudinary — иначе учителю можно подсунуть чужую ссылку
+    if (!isAllowedUploadUrl(screenshotUrl)) {
+      return res.status(400).json({ error: 'Недопустимая ссылка на скриншот' });
     }
 
     // Находим Student-запись этого пользователя у этого учителя
     const student = await Student.findOne({ where: { userId, teacherId } });
     if (!student) return res.status(403).json({ error: 'Вы не ученик этого преподавателя' });
 
-    // Способ = реальный канал учителя, который выбрал ученик (перевод/BLIK/PayPal/Revolut/другое)
-    const VALID_METHODS = ['cash', 'card', 'transfer', 'blik', 'paypal', 'revolut', 'other'];
-    const safeMethod = VALID_METHODS.includes(method) ? method : 'transfer';
+    const safeMethod = method || 'transfer';
 
     // source='student' + status='pending' — оплата ждёт проверки учителя (в долг пока НЕ идёт)
     const record = await PaymentRecord.create({

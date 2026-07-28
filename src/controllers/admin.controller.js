@@ -135,7 +135,7 @@ const setUserRole = async (req, res) => {
 const setUserPlan = async (req, res) => {
   try {
     const { plan } = req.body;
-    if (!['free', 'pro', 'school'].includes(plan)) {
+    if (!['free', 'basic', 'pro', 'school'].includes(plan)) {
       return res.status(400).json({ error: 'Недопустимый тариф' });
     }
     const user = await User.findByPk(req.params.id, { attributes: ['id', 'role', 'plan'] });

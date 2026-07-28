@@ -33,7 +33,7 @@ const User = sequelize.define('User', {
   },
   // Тариф учителя (SaaS-подписка). Управляется вебхуками Paddle (billing).
   plan: {
-    type: DataTypes.ENUM('free', 'pro', 'school'),
+    type: DataTypes.ENUM('free', 'basic', 'pro', 'school'),
     allowNull: false,
     defaultValue: 'free',
   },
@@ -41,6 +41,10 @@ const User = sequelize.define('User', {
   paddleCustomerId:     { type: DataTypes.STRING, allowNull: true },
   paddleSubscriptionId: { type: DataTypes.STRING, allowNull: true },
   subscriptionStatus:   { type: DataTypes.STRING, allowNull: true }, // active/trialing/past_due/canceled…
+  // occurred_at последнего применённого события Paddle — вебхуки приходят вне порядка
+  subscriptionEventAt:  { type: DataTypes.DATE, allowNull: true },
+  // Момент смены пароля — refresh-токены, выданные раньше, считаются отозванными
+  passwordChangedAt:    { type: DataTypes.DATE, allowNull: true },
   // Дневной лимит ИИ-запросов: дата (YYYY-MM-DD) + счётчик за этот день
   aiUsageDate:  { type: DataTypes.STRING, allowNull: true },
   aiUsageCount: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },

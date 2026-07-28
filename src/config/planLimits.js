@@ -1,14 +1,16 @@
-// Лимиты тарифов по роли (анти-абуз + монетизация). Ключи тарифов: free/pro/school
-// (отображаются как Бесплатный / Стандартный $3.99 / Максимальный $7.99; ≈15/30 zł по курсу; реальная валюта — в Paddle).
+// Лимиты тарифов по роли (анти-абуз + монетизация). Ключи тарифов: free/basic/pro/school
+// (Бесплатный / Базовый $1.99 / Стандартный $3.99 / Максимальный $7.99; реальная валюта — в Paddle).
 // aiPerDay — дневной лимит ИИ-запросов (роадмап/тест/карточки/оценка/источники) — главный ресурс (стоит денег).
 const LIMITS = {
   teacher: {
     free:   { groups: 3,   students: 25,   courses: 8,   aiPerDay: 30   },
+    basic:  { groups: 8,   students: 60,   courses: 20,  aiPerDay: 60   },
     pro:    { groups: 15,  students: 150,  courses: 40,  aiPerDay: 150  },
     school: { groups: 200, students: 3000, courses: 500, aiPerDay: 1000 },
   },
   student: {
     free:   { tracks: 3,   vocab: 100,   notes: 30,   aiPerDay: 20  },
+    basic:  { tracks: 8,   vocab: 300,   notes: 100,  aiPerDay: 40  },
     pro:    { tracks: 20,  vocab: 1000,  notes: 500,  aiPerDay: 100 },
     school: { tracks: 200, vocab: 10000, notes: 5000, aiPerDay: 500 },
   },

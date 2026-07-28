@@ -101,6 +101,10 @@ const writeLimiter = rateLimit({
 app.use('/api/v1/payments/record',    writeLimiter);
 app.use('/api/v1/attendance/confirm', writeLimiter);
 
+// Анти-всплеск на AI-эндпоинтах — middleware/aiRateLimit.js, вешается точечно на роуты,
+// которые реально дёргают провайдера (не на весь префикс: повторение карточек и сохранение
+// результатов идут теми же путями и под лимит попадать не должны).
+
 // Защита от спама обращениями в поддержку (публичная форма, 3 / час на IP)
 const supportLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
