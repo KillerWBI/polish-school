@@ -103,7 +103,25 @@ const getAll = async (req, res) => {
 
     // Прикреплённый тест (обе роли видят). Студенту — ещё его сдачу (для статуса).
     const myStudentIds = req.user.role === 'student' ? await getStudentIdsForUser(req.user.id) : [];
-    const include = [{ model: Quiz, as: 'quiz', attributes: ['id', 'topic', 'type', 'questions'] }];
+    const include = [
+      { model: Quiz, as: 'quiz', attributes: ['id', 'topic', 'type', 'questions'] },
+      // Контекст «откуда это задание»: урок, группа и преподаватель.
+      // Без него на странице висел один текст задания без указания, к чему он относится.
+      {
+        model: Lesson,
+        attributes: ['id', 'date', 'time', 'topic'],
+        include: [{
+          model: Group,
+          attributes: ['id', 'name'],
+          include: [{ model: User, as: 'teacher', attributes: ['id', 'name'] }],
+        }],
+      },
+      {
+        model: IndividualLesson,
+        attributes: ['id', 'date', 'time', 'topic'],
+        include: [{ model: User, as: 'teacher', attributes: ['id', 'name'] }],
+      },
+    ];
     if (req.user.role === 'student') {
       include.push({ model: HomeworkSubmission, required: false, where: { studentId: myStudentIds } });
     }

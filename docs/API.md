@@ -469,6 +469,8 @@ GET /users/@ivan_petrov/profile
 
 > ДЗ может иметь прикреплённый тест: `POST/PUT /homework` принимают `quizId` (тест из библиотеки учителя, `Quiz` c `!taken`). `GET /homework` и `/homework/:id` возвращают `quiz` (id/topic/type/questions). Прохождение сохраняется как `Quiz`-строка (владелец=проходивший, `homeworkId` set) → видно в «Мои тесты» ученика и в `quiz-attempts` учителя.
 
+> **Контекст задания (2026-07-30).** `GET /homework` дополнительно возвращает связи, чтобы на странице было видно, к чему относится задание: `Lesson` (id/date/time/topic) → `Group` (id/name) → `teacher` (id/name) для группового и `IndividualLesson` (id/date/time/topic) → `teacher` (id/name) для индивидуального. Раньше в ответе был только текст задания.
+
 ### POST /homework
 ```json
 // Body — указывается одно из двух: lessonId или individualLessonId
