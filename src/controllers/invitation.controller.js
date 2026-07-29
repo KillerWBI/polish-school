@@ -138,4 +138,23 @@ const patch = async (req, res) => {
   }
 };
 
-module.exports = { create, getAll, patch };
+// DELETE /invitations/:id — учитель отменяет своё ещё не принятое приглашение.
+// Обработанные (accepted/declined) не трогаем — это история, а не ожидание.
+const remove = async (req, res) => {
+  try {
+    const invitation = await Invitation.findByPk(req.params.id);
+    if (!invitation) return res.status(404).json({ error: 'Приглашение не найдено' });
+    if (invitation.teacherId !== req.user.id) return res.status(403).json({ error: 'Доступ запрещён' });
+    if (invitation.status !== 'pending') {
+      return res.status(400).json({ error: 'Приглашение уже обработано — отменить нельзя' });
+    }
+
+    await invitation.destroy();
+    res.json({ data: { message: 'Приглашение отменено' } });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Ошибка отмены приглашения' });
+  }
+};
+
+module.exports = { create, getAll, patch, remove };
