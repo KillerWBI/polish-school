@@ -287,8 +287,37 @@ GET /users/@ivan_petrov/profile
 
 | Method | Path | Auth | Role | Описание |
 |--------|------|------|------|----------|
-| POST | `/students/:id/merge` | ✅ | teacher | Перенести заглушку на реального ученика (история переезжает, заглушка удаляется) |
-| DELETE | `/students/:id` | ✅ | teacher | Полностью удалить заглушку из ростера (с историей); реального — нельзя (403) |
+| POST | `/students` | ✅ | teacher | Завести ученика без аккаунта вне группы (страница «Ученики») |
+| GET | `/students/:id/overview` | ✅ | teacher | Карточка ученика: группы, курсы, посещаемость, задания, долг — **только у этого учителя** |
+| POST | `/students/:id/merge` | ✅ | teacher | Перенести ученика без аккаунта на реального (история переезжает, карточка удаляется) |
+| DELETE | `/students/:id` | ✅ | teacher | Полностью удалить ученика без аккаунта (с историей); реального — нельзя (403) |
+
+### POST /students
+Создаёт ученика без аккаунта, не привязанного ни к одной группе — то же, что `POST /groups/:id/placeholder`, но без членства в группе. Лимит тарифа на число учеников проверяется так же (403 с `code: 'PLAN_LIMIT'`).
+```json
+// Body
+{ "name": "Иван", "contact": "+48 123 456 789" }   // contact необязателен
+// Response 201: { "data": { "id": "uuid", "name": "Иван", "contact": "...", "isPlaceholder": true } }
+```
+
+### GET /students/:id/overview
+`:id` — `Student.id`, а он уже привязан к `teacherId`, поэтому граница жёсткая: в выборку попадают только группы, уроки, задания и оплаты **текущего** учителя. Если ученик занимается ещё у кого-то, те данные сюда не входят. Задания считаются лишь по группам, где ученик состоит, и по его индивидуальным урокам.
+```json
+// Response 200
+{ "data": {
+  "id": "uuid", "name": "Анна", "contact": null, "isPlaceholder": false,
+  "username": "anna_k", "avatar": "...", "email": "...", "since": "2026-03-01T...",
+  "groups":  [{ "id": "uuid", "name": "B1 вечер", "pricePerLesson": "60.00" }],
+  "courses": [{ "id": "uuid", "name": "Разговорный", "pricePerLesson": "90.00" }],
+  "attendance": { "total": 24, "present": 22, "percent": 92 },
+  "homework":   { "assigned": 12, "submitted": 11, "graded": 10, "avgGrade": 87.5 },
+  "finance":    { "charged": 1320, "paid": 1200, "debt": 120 }
+} }
+
+// Ошибки: 404 ученик не найден или принадлежит другому учителю
+```
+
+> ⚠️ Не путать с `GET /analytics/student/:id`: тот считает **по всем учителям сразу** (`getStudentIdsForUser`) и предназначен для самого ученика. Для показа учителю используйте только `overview`.
 
 ### POST /students/:id/merge
 `:id` — заглушка (своя, `userId=null`). Все её записи в 6 таблицах перепривязываются на `targetStudentId` (реальный, свой), конфликты unique разрешаются «оставить target, отбросить дубль заглушки», затем заглушка удаляется. Всё в транзакции.
@@ -602,6 +631,7 @@ GET /users/@ivan_petrov/profile
 | POST | `/groups/:id/invitations` | ✅ | teacher | Пригласить студента (по `User.id`) в группу |
 | GET | `/invitations` | ✅ | teacher/student | Список (роль-свитч: учитель — исходящие, студент — входящие); фильтр `?status=` |
 | PATCH | `/invitations/:id` | ✅ | student | Принять (`accepted`) или отклонить (`declined`) приглашение |
+| DELETE | `/invitations/:id` | ✅ | teacher | Отменить своё ещё не принятое приглашение |
 
 ### POST /groups/:id/invitations
 ```json
@@ -641,6 +671,16 @@ GET /users/@ivan_petrov/profile
 
 // Ошибки: 404 не найдено; 403 не своё приглашение / не student;
 //         400 уже обработано (status != pending)
+```
+
+### DELETE /invitations/:id
+Учитель отзывает приглашение, пока ученик не ответил (блок «Отправленные приглашения» на странице «Ученики»).
+```json
+// Response 200
+{ "data": { "message": "Приглашение отменено" } }
+
+// Ошибки: 404 не найдено; 403 чужое приглашение / не teacher;
+//         400 уже обработано (accepted/declined — это история, её не удаляем)
 ```
 
 ---

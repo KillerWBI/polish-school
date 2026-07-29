@@ -1,14 +1,140 @@
 const sequelize = require('../config/database');
 const { QueryTypes } = require('sequelize');
-const { Student, VocabItem, StudentLessonLog, Topic, Quiz } = require('../models');
-const { getStudentIdsForUser } = require('../utils/students');
+const { Student, VocabItem, StudentLessonLog, Topic, Quiz, User } = require('../models');
+const { getStudentIdsForUser, createPlaceholder } = require('../utils/students');
+const { fetchChargesAndPayments } = require('./payment.controller');
+const { overLimit } = require('../config/planLimits');
 const { generateQuiz } = require('../services/aiQuiz');
 const { enforceAi } = require('../utils/aiLimit');
 // FK = список 6 таблиц, где лежит ученик (см. studentFkRegistry.js). Каждый элемент —
 // объект { table:'Attendances', column:'studentId', uniqueWith:[...] }. Это и есть «где искать ученика».
 const FK = require('../utils/studentFkRegistry');
 
-// POST /students/:id/merge — перенести заглушку (source) на реального ученика (target).
+// POST /students — завести ученика без аккаунта вне группы (со страницы «Ученики»).
+// Тот же ученик, что и добавленный внутри группы, просто пока не привязан ни к одной.
+const create = async (req, res) => {
+  try {
+    const { name, contact } = req.body;
+
+    const me = await User.findByPk(req.user.id, { attributes: ['plan'] });
+    const usedStudents = await Student.count({ where: { teacherId: req.user.id } });
+    if (overLimit(res, 'teacher', me?.plan, 'students', usedStudents)) return;
+
+    const student = await createPlaceholder(req.user.id, name, contact);
+    res.status(201).json({
+      data: { id: student.id, name: student.name, contact: student.contact, isPlaceholder: true },
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Ошибка добавления ученика' });
+  }
+};
+
+// GET /students/:id/overview — всё, что учитель знает об ученике.
+// Границы намеренно жёсткие: `:id` — это Student.id, который уже привязан к teacherId,
+// поэтому в выборку попадают только группы, уроки, задания и оплаты ЭТОГО учителя.
+// Занятия ученика у других преподавателей сюда не попадают.
+const getOverview = async (req, res) => {
+  try {
+    const teacherId = req.user.id;
+
+    const student = await Student.findOne({
+      where: { id: req.params.id, teacherId },
+      include: [{ model: User, as: 'account', attributes: ['id', 'name', 'username', 'avatar', 'email'] }],
+    });
+    if (!student) return res.status(404).json({ error: 'Ученик не найден' });
+
+    const [groups, courses, attendance, homework, money] = await Promise.all([
+      // Группы этого учителя, где состоит ученик
+      sequelize.query(`
+        SELECT g.id, g.name, g."pricePerLesson"
+          FROM "GroupStudents" gs
+          JOIN "Groups" g ON g.id = gs."groupId"
+         WHERE gs."studentId" = :sid AND g."teacherId" = :tid
+         ORDER BY g.name`,
+        { replacements: { sid: student.id, tid: teacherId }, type: QueryTypes.SELECT }),
+
+      // Индивидуальные курсы этого учителя
+      sequelize.query(`
+        SELECT id, name, "pricePerLesson"
+          FROM "IndividualCourses"
+         WHERE "studentId" = :sid AND "teacherId" = :tid
+         ORDER BY "createdAt" DESC`,
+        { replacements: { sid: student.id, tid: teacherId }, type: QueryTypes.SELECT }),
+
+      // Посещаемость: только уроки этого учителя (групповые + индивидуальные)
+      sequelize.query(`
+        SELECT COUNT(*)::int AS total,
+               COUNT(*) FILTER (WHERE a.present)::int AS present
+          FROM "Attendances" a
+          LEFT JOIN "Lessons" l           ON l.id = a."lessonId"
+          LEFT JOIN "Groups" g            ON g.id = l."groupId"
+          LEFT JOIN "IndividualLessons" il ON il.id = a."individualLessonId"
+         WHERE a."studentId" = :sid
+           AND (g."teacherId" = :tid OR il."teacherId" = :tid)`,
+        { replacements: { sid: student.id, tid: teacherId }, type: QueryTypes.SELECT }),
+
+      // Задания, которые касаются именно этого ученика: по группам, где он состоит,
+      // и по его индивидуальным урокам. Задания других групп учителя сюда не входят.
+      sequelize.query(`
+        SELECT COUNT(*)::int AS assigned,
+               COUNT(hs.id)::int AS submitted,
+               COUNT(hs.grade)::int AS graded,
+               COALESCE(ROUND(AVG(hs.grade)::numeric, 1), 0)::float AS "avgGrade"
+          FROM "Homeworks" h
+          LEFT JOIN "Lessons" l            ON l.id = h."lessonId"
+          LEFT JOIN "Groups" g             ON g.id = l."groupId"
+          LEFT JOIN "IndividualLessons" il ON il.id = h."individualLessonId"
+          LEFT JOIN "HomeworkSubmissions" hs ON hs."homeworkId" = h.id AND hs."studentId" = :sid
+         WHERE (
+                 (g."teacherId" = :tid AND EXISTS (
+                    SELECT 1 FROM "GroupStudents" gs
+                     WHERE gs."groupId" = g.id AND gs."studentId" = :sid))
+                 OR (il."teacherId" = :tid AND il."studentId" = :sid)
+               )`,
+        { replacements: { sid: student.id, tid: teacherId }, type: QueryTypes.SELECT }),
+
+      fetchChargesAndPayments([student.id], teacherId),
+    ]);
+
+    const att = attendance[0] ?? { total: 0, present: 0 };
+    const hw  = homework[0] ?? { assigned: 0, submitted: 0, graded: 0, avgGrade: 0 };
+    const charged = money.chargedByStudent.get(student.id) ?? 0;
+    const paid    = money.paidByStudent.get(student.id) ?? 0;
+
+    res.json({
+      data: {
+        id:            student.id,
+        name:          student.name,
+        contact:       student.contact,
+        isPlaceholder: !student.userId,
+        username:      student.account?.username ?? null,
+        avatar:        student.account?.avatar ?? null,
+        email:         student.account?.email ?? null,
+        since:         student.createdAt,
+        groups,
+        courses,
+        attendance: {
+          total:   att.total,
+          present: att.present,
+          percent: att.total ? Math.round((att.present / att.total) * 100) : 0,
+        },
+        homework: {
+          assigned:  hw.assigned,
+          submitted: hw.submitted,
+          graded:    hw.graded,
+          avgGrade:  hw.avgGrade,
+        },
+        finance: { charged, paid, debt: Math.max(charged - paid, 0) },
+      },
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Ошибка получения данных ученика' });
+  }
+};
+
+// POST /students/:id/merge — перенести ученика без аккаунта (source) на аккаунт реального (target).
 // Все записи заглушки перепривязываются на target по реестру FK (в транзакции),
 // конфликты unique разрешаются «keep-target, skip-source» (дубль заглушки удаляется),
 // затем заглушка удаляется. Каскад НЕ используется (5 FK = NO ACTION на delete) —
@@ -317,4 +443,4 @@ const generateTargetedQuiz = async (req, res) => {
   }
 };
 
-module.exports = { merge, remove, getMyProgress, getTrackInsights, generateTargetedQuiz };
+module.exports = { create, getOverview, merge, remove, getMyProgress, getTrackInsights, generateTargetedQuiz };

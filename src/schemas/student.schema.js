@@ -1,6 +1,12 @@
 const { z } = require('zod');
 
-// POST /students/:id/merge — перенести заглушку на реального ученика
+// POST /students — завести ученика без аккаунта вне группы (со страницы «Ученики»)
+const createStudent = z.object({
+  name:    z.string().trim().min(1, 'Имя обязательно'),
+  contact: z.string().trim().nullish(),
+});
+
+// POST /students/:id/merge — перенести ученика без аккаунта на аккаунт реального ученика
 const mergeStudent = z.object({
   targetStudentId: z.uuid('targetStudentId должен быть валидным UUID'),
 });
@@ -14,4 +20,4 @@ const targetedQuiz = z.object({
   count: z.number().int().min(3).max(12).optional(),
 });
 
-module.exports = { mergeStudent, targetedQuiz };
+module.exports = { createStudent, mergeStudent, targetedQuiz };

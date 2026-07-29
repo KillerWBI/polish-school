@@ -525,4 +525,4 @@ const cancelMyPayment = async (req, res) => {
   }
 };
 
-module.exports = { computeChargedByTeacher, getDebt, getMyPaymentHistory, recordPayment, getPaymentHistory, getDebtsForTeacher, getStudentDebtTotal, getTeacherDebtTotal, getTeacherPaymentInfo, studentRecordPayment, getPendingPayments, approvePayment, rejectPayment, cancelMyPayment };
+module.exports = { computeChargedByTeacher, fetchChargesAndPayments, getDebt, getMyPaymentHistory, recordPayment, getPaymentHistory, getDebtsForTeacher, getStudentDebtTotal, getTeacherDebtTotal, getTeacherPaymentInfo, studentRecordPayment, getPendingPayments, approvePayment, rejectPayment, cancelMyPayment };
