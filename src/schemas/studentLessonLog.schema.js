@@ -4,7 +4,10 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_RE = /^\d{2}:\d{2}$/;
 
 // POST /my-lessons — создать запись о занятии
+// repeatWeekly — создать сразу три занятия по неделям (см. REPEAT_COUNT в контроллере)
 const createLog = z.object({
+  studentTeacherId: z.uuid().nullable().optional(),
+  repeatWeekly:   z.boolean().optional(),
   teacherLabel:   z.string().trim().max(100).nullable().optional(),
   subject:        z.string().trim().min(1, 'Укажите предмет').max(100),
   date:           z.string().regex(DATE_RE, 'date: формат YYYY-MM-DD'),
@@ -19,6 +22,7 @@ const createLog = z.object({
 
 // PUT /my-lessons/:id — обновить
 const updateLog = z.object({
+  studentTeacherId: z.uuid().nullable().optional(),
   teacherLabel:   z.string().trim().max(100).nullable().optional(),
   subject:        z.string().trim().min(1).max(100).optional(),
   date:           z.string().regex(DATE_RE).optional(),

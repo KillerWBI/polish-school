@@ -16,6 +16,7 @@ const SupportTicket = require('./SupportTicket');
 const VocabItem = require('./VocabItem');
 const StudentLessonLog = require('./StudentLessonLog');
 const StudentNote = require('./StudentNote');
+const StudentTeacher = require('./StudentTeacher');
 const Notification = require('./Notification');
 const Topic = require('./Topic');
 const TrackCard = require('./TrackCard');
@@ -97,6 +98,13 @@ VocabItem.belongsTo(User, { foreignKey: 'userId', as: 'owner' });
 // StudentLessonLog ↔ User (владелец — ученик, ведёт личный журнал внешних занятий)
 StudentLessonLog.belongsTo(User, { foreignKey: 'userId', as: 'owner' });
 
+// StudentTeacher ↔ User (карточка «моего преподавателя», которую ученик завёл сам)
+StudentTeacher.belongsTo(User, { foreignKey: 'userId', as: 'owner' });
+// Занятие может ссылаться на карточку. Удаление карточки не трогает занятия:
+// история остаётся, имя в ней сохранено в teacherLabel.
+StudentLessonLog.belongsTo(StudentTeacher, { foreignKey: 'studentTeacherId', as: 'studentTeacher' });
+StudentTeacher.hasMany(StudentLessonLog, { foreignKey: 'studentTeacherId', as: 'lessons' });
+
 // StudentNote ↔ User / Lesson / IndividualLesson (личные заметки ученика)
 StudentNote.belongsTo(User, { foreignKey: 'userId', as: 'owner' });
 StudentNote.belongsTo(Lesson, { foreignKey: 'lessonId' });
@@ -138,6 +146,7 @@ module.exports = {
   VocabItem,
   StudentLessonLog,
   StudentNote,
+  StudentTeacher,
   Notification,
   Topic,
   TrackCard,
