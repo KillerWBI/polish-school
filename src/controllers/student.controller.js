@@ -1,5 +1,5 @@
 const sequelize = require('../config/database');
-const { QueryTypes } = require('sequelize');
+const { QueryTypes, Op } = require('sequelize');
 const { Student, VocabItem, StudentLessonLog, Topic, Quiz, User } = require('../models');
 const { getStudentIdsForUser, createPlaceholder } = require('../utils/students');
 const { fetchChargesAndPayments } = require('./payment.controller');
@@ -269,7 +269,8 @@ const getMyProgress = async (req, res) => {
             FROM "VocabItems" v WHERE v."userId" = :userId
           UNION ALL
           SELECT sl.date AS day
-            FROM "StudentLessonLogs" sl WHERE sl."userId" = :userId
+            FROM "StudentLessonLogs" sl
+            WHERE sl."userId" = :userId AND sl.date <= CURRENT_DATE
         ) src
         WHERE day >= (NOW() - INTERVAL '180 days')::date
         GROUP BY day ORDER BY day;
@@ -280,7 +281,9 @@ const getMyProgress = async (req, res) => {
         SELECT day, COUNT(*)::int AS count FROM (
           SELECT (v."updatedAt")::date AS day FROM "VocabItems" v WHERE v."userId" = :userId
           UNION ALL
-          SELECT sl.date AS day FROM "StudentLessonLogs" sl WHERE sl."userId" = :userId
+          SELECT sl.date AS day
+            FROM "StudentLessonLogs" sl
+            WHERE sl."userId" = :userId AND sl.date <= CURRENT_DATE
         ) src
         WHERE day >= (NOW() - INTERVAL '180 days')::date
         GROUP BY day ORDER BY day;
@@ -311,8 +314,13 @@ const getMyProgress = async (req, res) => {
     const vocabCounts = { new: 0, learning: 0, known: 0 };
     for (const v of vocab) vocabCounts[v.status] = (vocabCounts[v.status] ?? 0) + 1;
 
-    // Внешние занятия — часы и число
-    const ext = await StudentLessonLog.findAll({ where: { userId }, attributes: ['durationMin'] });
+    // Свои занятия — часы и число. Только прошедшие: запланированные на будущее
+    // ещё не отучены, в счётчик часов им рано
+    const today = new Date().toISOString().slice(0, 10);
+    const ext = await StudentLessonLog.findAll({
+      where: { userId, date: { [Op.lte]: today } },
+      attributes: ['durationMin'],
+    });
     const extMinutes = ext.reduce((s, r) => s + (r.durationMin || 0), 0);
 
     res.json({

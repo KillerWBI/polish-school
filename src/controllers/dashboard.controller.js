@@ -1,6 +1,7 @@
 const {
   Group, GroupStudent, Lesson, IndividualLesson,
   Homework, HomeworkSubmission, Attendance, PaymentRecord, User, Student,
+  StudentLessonLog,
 } = require('../models');
 const { Op } = require('sequelize');
 const { getTeacherDebtTotal, getStudentDebtTotal } = require('./payment.controller');
@@ -165,6 +166,7 @@ const buildStudentDashboard = async (userId) => {
     weekGroupCount, weekIndCount,
     monthLessons, monthIndLessons,
     upcomingGroup, upcomingInd,
+    weekOwnCount, upcomingOwn,
   ] = await Promise.all([
     groupIds.length
       ? Lesson.findAll({ where: { groupId: { [Op.in]: groupIds } }, attributes: ['id'] })
@@ -194,9 +196,18 @@ const buildStudentDashboard = async (userId) => {
       limit: 5,
       attributes: ['id', 'date', 'time'],
     }),
+    // Занятия, которые ученик ведёт сам (свои преподаватели вне платформы,
+    // самостоятельная работа) — считаются наравне с платформенными
+    StudentLessonLog.count({ where: { userId, date: { [Op.between]: [today, next7Days] } } }),
+    StudentLessonLog.findAll({
+      where: { userId, date: { [Op.gte]: today } },
+      order: [['date', 'ASC'], ['time', 'ASC']],
+      limit: 5,
+      attributes: ['id', 'date', 'time', 'topic', 'subject', 'teacherLabel', 'type'],
+    }),
   ]);
 
-  const lessonsThisWeek    = weekGroupCount + weekIndCount;
+  const lessonsThisWeek    = weekGroupCount + weekIndCount + weekOwnCount;
   const allLessonIds       = allLessons.map(l => l.id);
   const allIndLessonIds    = allIndLessons.map(l => l.id);
   const monthLessonIds     = monthLessons.map(l => l.id);
@@ -258,6 +269,12 @@ const buildStudentDashboard = async (userId) => {
     ...upcomingInd.map(l => ({
       id: l.id, date: l.date, time: l.time, topic: null,
       type: 'individual', label: l.teacher?.name,
+      lessonLink: null,
+    })),
+    // Свои занятия: подпись — преподаватель, а для самостоятельных его нет, тогда предмет
+    ...upcomingOwn.map(l => ({
+      id: l.id, date: l.date, time: l.time, topic: l.topic,
+      type: 'own', label: l.teacherLabel || l.subject,
       lessonLink: null,
     })),
   ]

@@ -14,7 +14,11 @@ const StudentLessonLog = sequelize.define('StudentLessonLog', {
     type: DataTypes.UUID,
     allowNull: false,
   },
-  // Имя преподавателя/источника — просто строка (не FK): «Пан Войтек», «Duolingo», «сам»
+  // Карточка «моего преподавателя», если занятие привязано к ней (nullable:
+  // самостоятельные занятия и записи, созданные до появления карточек, её не имеют)
+  studentTeacherId: { type: DataTypes.UUID, allowNull: true },
+  // Имя преподавателя/источника строкой: «Пан Войтек», «Duolingo», «сам».
+  // При выборе карточки дублируется сюда — чтобы история не потерялась, если карточку удалят.
   teacherLabel: { type: DataTypes.STRING, allowNull: true },
   subject:      { type: DataTypes.STRING, allowNull: false },
   date:         { type: DataTypes.DATEONLY, allowNull: false },

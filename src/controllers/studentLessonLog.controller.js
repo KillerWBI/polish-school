@@ -1,5 +1,5 @@
 const { Op } = require('sequelize');
-const { StudentLessonLog } = require('../models');
+const { StudentLessonLog, StudentTeacher } = require('../models');
 
 // GET /my-lessons — записи ученика (фильтр ?type=&subject=&from=&to=)
 const list = async (req, res) => {
@@ -14,7 +14,12 @@ const list = async (req, res) => {
       if (to) where.date[Op.lte] = to;
     }
 
-    const rows = await StudentLessonLog.findAll({ where, order: [['date', 'DESC'], ['time', 'DESC']] });
+    const rows = await StudentLessonLog.findAll({
+      where,
+      // Карточка преподавателя нужна календарю и списку — показать предмет и контакт
+      include: [{ model: StudentTeacher, as: 'studentTeacher', attributes: ['id', 'name', 'subject', 'contact'], required: false }],
+      order: [['date', 'DESC'], ['time', 'DESC']],
+    });
     res.json({ data: rows });
   } catch (err) {
     console.error(err);
@@ -29,7 +34,6 @@ const stats = async (req, res) => {
 
     let lessons = 0, minutes = 0, debt = 0, paid = 0;
     const bySubject = {};      // subject → { lessons, minutes }
-    const byTeacher = {};      // teacherLabel → { lessons, debt }
 
     for (const r of rows) {
       lessons += 1;
@@ -41,18 +45,15 @@ const stats = async (req, res) => {
       bySubject[subj] = bySubject[subj] || { lessons: 0, minutes: 0 };
       bySubject[subj].lessons += 1;
       bySubject[subj].minutes += r.durationMin || 0;
-
-      const tch = r.teacherLabel || '—';
-      byTeacher[tch] = byTeacher[tch] || { lessons: 0, debt: 0 };
-      byTeacher[tch].lessons += 1;
-      if (!r.isPaid) byTeacher[tch].debt += price;
     }
 
+    // Разбивка по преподавателям приходит из GET /student-teachers — там она
+    // считается по карточкам, а не по строке-имени, поэтому здесь её нет
     res.json({
       data: {
         lessons, hours: Math.round(minutes / 6) / 10, // 1 знак после запятой
         debt, paid,
-        bySubject, byTeacher,
+        bySubject,
       },
     });
   } catch (err) {
@@ -61,15 +62,37 @@ const stats = async (req, res) => {
   }
 };
 
-// POST /my-lessons
+// Сдвигает дату 'YYYY-MM-DD' на N недель вперёд
+const plusWeeks = (isoDate, weeks) => {
+  const d = new Date(`${isoDate}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + weeks * 7);
+  return d.toISOString().slice(0, 10);
+};
+
+// Сколько занятий создаёт галочка «повторять еженедельно»: это и две следующие недели.
+// Дальше ученик добавляет сам — так в календаре не появляется расписание на год,
+// которое потом нечем разгрести.
+const REPEAT_COUNT = 3;
+
+// POST /my-lessons — одно занятие или, с repeatWeekly, сразу три подряд по неделям.
+// Каждое созданное занятие — отдельная запись: лишнее удаляется по одному.
 const create = async (req, res) => {
   try {
     const b = req.body;
-    const log = await StudentLessonLog.create({
+
+    // Занятие можно привязать к карточке «моего преподавателя». Проверяем, что она своя.
+    let teacher = null;
+    if (b.studentTeacherId) {
+      teacher = await StudentTeacher.findOne({ where: { id: b.studentTeacherId, userId: req.user.id } });
+      if (!teacher) return res.status(404).json({ error: 'Преподаватель не найден' });
+    }
+
+    const baseFields = {
       userId: req.user.id,
-      teacherLabel: b.teacherLabel || null,
+      studentTeacherId: teacher ? teacher.id : null,
+      // Имя дублируем в запись, чтобы история пережила удаление карточки
+      teacherLabel: teacher ? teacher.name : (b.teacherLabel || null),
       subject: b.subject,
-      date: b.date,
       time: b.time || null,
       durationMin: b.durationMin ?? null,
       topic: b.topic || null,
@@ -78,8 +101,14 @@ const create = async (req, res) => {
       isPaid: b.isPaid ?? false,
       paidAt: b.isPaid ? new Date() : null,
       type: b.type || 'external',
-    });
-    res.status(201).json({ data: log });
+    };
+
+    const dates = b.repeatWeekly
+      ? Array.from({ length: REPEAT_COUNT }, (_, i) => plusWeeks(b.date, i))
+      : [b.date];
+
+    const rows = await StudentLessonLog.bulkCreate(dates.map((date) => ({ ...baseFields, date })));
+    res.status(201).json({ data: b.repeatWeekly ? rows : rows[0] });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Ошибка создания записи' });
@@ -96,6 +125,17 @@ const update = async (req, res) => {
     const patch = {};
     for (const k of ['teacherLabel', 'subject', 'date', 'time', 'durationMin', 'topic', 'notes', 'pricePerLesson', 'type']) {
       if (b[k] !== undefined) patch[k] = b[k];
+    }
+    // Сменили карточку преподавателя — проверяем, что она своя, и подтягиваем имя
+    if (b.studentTeacherId !== undefined) {
+      if (b.studentTeacherId) {
+        const teacher = await StudentTeacher.findOne({ where: { id: b.studentTeacherId, userId: req.user.id } });
+        if (!teacher) return res.status(404).json({ error: 'Преподаватель не найден' });
+        patch.studentTeacherId = teacher.id;
+        patch.teacherLabel = teacher.name;
+      } else {
+        patch.studentTeacherId = null;
+      }
     }
     // Смена флага оплаты синхронизирует paidAt
     if (b.isPaid !== undefined && b.isPaid !== log.isPaid) {
