@@ -33,10 +33,26 @@ const verifyBook = async ({ title, author }) => {
   }
 };
 
+// Хост, по которому сервер НЕ должен ходить: ИИ может вернуть адрес внутренней сети,
+// и тогда наш запрос уходит во внутренний периметр (SSRF).
+const isInternalHost = (hostname) => {
+  const h = hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  if (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.internal') || h.endsWith('.local')) return true;
+  if (h === '::1' || h.startsWith('fc') || h.startsWith('fd') || h.startsWith('fe80')) return true;
+  const v4 = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (!v4) return false;
+  const [a, b] = v4.slice(1).map(Number);
+  return a === 10 || a === 127 || a === 0
+    || (a === 172 && b >= 16 && b <= 31)
+    || (a === 192 && b === 168)
+    || (a === 169 && b === 254);
+};
+
 // Проверить ссылку GET-запросом (точнее HEAD по части «мягких» 404). Возвращает источник или null.
 const verifyLink = async ({ title, url }) => {
   try {
     if (!/^https?:\/\//i.test(url || '')) return null;
+    if (isInternalHost(new URL(url).hostname)) return null;
     // GET надёжнее HEAD: многие серверы отдают неверный статус на HEAD.
     const resp = await fetchTimeout(url, {
       method: 'GET',
