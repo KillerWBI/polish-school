@@ -371,7 +371,19 @@ const getDebtsForTeacher = async (req, res) => {
 // GET /payments/teacher-info/:teacherId — реквизиты учителя для страницы оплаты ученика
 const getTeacherPaymentInfo = async (req, res) => {
   try {
-    const teacher = await User.findByPk(req.params.teacherId, {
+    const { teacherId } = req.params;
+
+    // Реквизиты (IBAN/PayPal/BLIK) видит только сам учитель и его ученики —
+    // иначе любой залогиненный по UUID вытягивал бы чужие платёжные данные
+    if (req.user.id !== teacherId) {
+      const linked = await Student.findOne({
+        where: { userId: req.user.id, teacherId },
+        attributes: ['id'],
+      });
+      if (!linked) return res.status(403).json({ error: 'Доступ запрещён' });
+    }
+
+    const teacher = await User.findByPk(teacherId, {
       attributes: ['id', 'name', 'paymentDetails'],
     });
     if (!teacher) return res.status(404).json({ error: 'Преподаватель не найден' });
