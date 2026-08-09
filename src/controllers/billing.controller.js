@@ -1,5 +1,8 @@
 const { User } = require('../models');
-const { verifyWebhook, planForPrice } = require('../services/paddle');
+const {
+  verifyWebhook, planForPrice, paddleConfigured,
+  getSubscription, cancelSubscription, resumeSubscription,
+} = require('../services/paddle');
 
 // POST /billing/webhook — приём событий Paddle (billing). Тело — RAW (см. app.js).
 // Обновляет User.plan по подписке. Отвечаем 200 всегда (иначе Paddle ретраит).
@@ -62,4 +65,84 @@ const webhook = async (req, res) => {
   }
 };
 
-module.exports = { webhook };
+// ── GET /billing/status — состояние подписки текущего пользователя ───────────────
+// Локальные поля отдаём всегда; в Paddle ходим только если подписка есть и ключ задан
+// (иначе бесплатный тариф платил бы задержкой сетевого запроса ни за что).
+const status = async (req, res) => {
+  try {
+    const user = await User.findByPk(req.user.id, {
+      attributes: ['id', 'plan', 'subscriptionStatus', 'paddleSubscriptionId'],
+    });
+    if (!user) return res.status(404).json({ error: 'Пользователь не найден' });
+
+    const base = {
+      plan: user.plan,
+      subscriptionStatus: user.subscriptionStatus,
+      hasSubscription: Boolean(user.paddleSubscriptionId),
+      manageable: Boolean(user.paddleSubscriptionId) && paddleConfigured(),
+      nextBilledAt: null,
+      scheduledCancelAt: null,
+      updatePaymentUrl: null,
+    };
+
+    if (!base.manageable) return res.json({ data: base });
+
+    try {
+      const sub = await getSubscription(user.paddleSubscriptionId);
+      base.subscriptionStatus = sub.status || base.subscriptionStatus;
+      base.nextBilledAt = sub.next_billed_at || null;
+      base.scheduledCancelAt = sub.scheduled_change?.action === 'cancel'
+        ? sub.scheduled_change.effective_at
+        : null;
+      base.updatePaymentUrl = sub.management_urls?.update_payment_method || null;
+    } catch (e) {
+      // Paddle недоступен — отдаём то, что знаем локально, страница не должна падать
+      console.warn('[paddle] status:', e.message);
+    }
+
+    res.json({ data: base });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Ошибка получения статуса подписки' });
+  }
+};
+
+// ── POST /billing/cancel — отмена в конце оплаченного периода ────────────────────
+const cancel = async (req, res) => {
+  try {
+    const user = await User.findByPk(req.user.id);
+    if (!user?.paddleSubscriptionId) {
+      return res.status(400).json({ error: 'Активной подписки нет' });
+    }
+    const sub = await cancelSubscription(user.paddleSubscriptionId);
+    // plan НЕ трогаем: оплаченный период дорабатывает, на 'free' переведёт вебхук
+    await user.update({ subscriptionStatus: sub.status || user.subscriptionStatus });
+    res.json({
+      data: {
+        scheduledCancelAt: sub.scheduled_change?.effective_at || null,
+        subscriptionStatus: sub.status || null,
+      },
+    });
+  } catch (err) {
+    console.error('[paddle] cancel:', err.message);
+    res.status(502).json({ error: 'Не удалось отменить подписку' });
+  }
+};
+
+// ── POST /billing/resume — снять запланированную отмену ─────────────────────────
+const resume = async (req, res) => {
+  try {
+    const user = await User.findByPk(req.user.id);
+    if (!user?.paddleSubscriptionId) {
+      return res.status(400).json({ error: 'Активной подписки нет' });
+    }
+    const sub = await resumeSubscription(user.paddleSubscriptionId);
+    await user.update({ subscriptionStatus: sub.status || user.subscriptionStatus });
+    res.json({ data: { subscriptionStatus: sub.status || null } });
+  } catch (err) {
+    console.error('[paddle] resume:', err.message);
+    res.status(502).json({ error: 'Не удалось возобновить подписку' });
+  }
+};
+
+module.exports = { webhook, status, cancel, resume };

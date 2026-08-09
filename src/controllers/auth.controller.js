@@ -5,6 +5,7 @@ const { User } = require('../models');
 const { sendVerificationEmail, sendPasswordResetEmail } = require('../services/email');
 const { validateEmail } = require('../services/emailValidator');
 const { generateUsername } = require('../utils/username');
+const { issueCsrfToken, clearCsrfToken } = require('../middleware/csrf');
 
 // access-токен (короткоживущий, в теле ответа → localStorage/Bearer).
 // Дефолт 1ч: при XSS-краже окно мало, refresh-cookie (30д) продлевает сессию.
@@ -111,7 +112,7 @@ const register = async (req, res) => {
     const token = signToken(user);
     setRefreshCookie(res, user);
     setAccessCookie(res, token);
-    res.status(201).json({ data: { token, user: userResponse(user) } });
+    res.status(201).json({ data: { token, csrfToken: issueCsrfToken(res), user: userResponse(user) } });
   } catch (err) {
     if (err.name === 'SequelizeUniqueConstraintError') {
       return res.status(400).json({ error: 'Аккаунт с таким email уже существует' });
@@ -137,7 +138,7 @@ const login = async (req, res) => {
     const token = signToken(user);
     setRefreshCookie(res, user);
     setAccessCookie(res, token);
-    res.json({ data: { token, user: userResponse(user) } });
+    res.json({ data: { token, csrfToken: issueCsrfToken(res), user: userResponse(user) } });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Ошибка входа' });
@@ -177,7 +178,7 @@ const refresh = async (req, res) => {
     setRefreshCookie(res, user);
     setAccessCookie(res, accessToken);
 
-    res.json({ data: { token: accessToken } });
+    res.json({ data: { token: accessToken, csrfToken: issueCsrfToken(res) } });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Ошибка обновления токена' });
@@ -188,6 +189,7 @@ const refresh = async (req, res) => {
 const logout = (req, res) => {
   res.clearCookie(REFRESH_COOKIE, { ...refreshCookieOpts, maxAge: undefined });
   res.clearCookie(ACCESS_COOKIE,  { ...accessCookieOpts,  maxAge: undefined });
+  clearCsrfToken(res);
   res.json({ data: { message: 'Выход выполнен' } });
 };
 
@@ -202,7 +204,9 @@ const me = async (req, res) => {
       ],
     });
     if (!user) return res.status(404).json({ error: 'Пользователь не найден' });
-    res.json({ data: user });
+    // Перевыдаём CSRF-токен: /auth/me зовётся при загрузке приложения, поэтому сессия,
+    // открытая до появления защиты, получит токен на первом же заходе, а не через 7 дней.
+    res.json({ data: user, csrfToken: issueCsrfToken(res) });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Ошибка получения профиля' });
@@ -226,7 +230,7 @@ const registerTeacher = async (req, res) => {
     const token = signToken(user);
     setRefreshCookie(res, user);
     setAccessCookie(res, token);
-    res.status(201).json({ data: { token, user: userResponse(user) } });
+    res.status(201).json({ data: { token, csrfToken: issueCsrfToken(res), user: userResponse(user) } });
   } catch (err) {
     if (err.name === 'SequelizeUniqueConstraintError') {
       return res.status(400).json({ error: 'Аккаунт с таким email уже существует' });
