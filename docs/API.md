@@ -748,7 +748,8 @@ GET /users/@ivan_petrov/profile
 
 | Method | Path | Auth | Role | Описание |
 |--------|------|------|------|----------|
-| GET | `/notifications` | ✅ | any | Мои (последние 50); `?unread=true` — только непрочитанные; `meta.unreadCount` |
+| GET | `/notifications` | ✅ | any | Лента колокольчика: непрочитанные + прочитанные за последний час (последние 50); `?unread=true` — только непрочитанные; `meta.unreadCount` |
+| GET | `/notifications/history` | ✅ | any | Полная история событий с пагинацией: `?page=&limit=` (limit ≤ 100); `meta: { page, limit, total, pages }` |
 | PATCH | `/notifications/:id/read` | ✅ | any | Отметить одно прочитанным |
 | PATCH | `/notifications/read-all` | ✅ | any | Отметить все прочитанными |
 
@@ -936,6 +937,9 @@ Query: ?cursor=&limit=   (limit 1..50, default 10)
 | Method | Path | Auth | Описание |
 |--------|------|------|----------|
 | POST | `/billing/webhook` | подпись Paddle | Приём событий Paddle (Billing). Тело **RAW** (смонтирован до `express.json` в `app.js`). Проверка подписи `Paddle-Signature` через `PADDLE_WEBHOOK_SECRET`. |
+| GET | `/billing/status` | ✅ | Состояние подписки: `{ plan, subscriptionStatus, hasSubscription, manageable, nextBilledAt, scheduledCancelAt, updatePaymentUrl }`. В Paddle ходит только если подписка есть и задан `PADDLE_API_KEY`; при недоступности Paddle отдаёт локальные поля. |
+| POST | `/billing/cancel` | ✅ | Отмена подписки в конце оплаченного периода (`effective_from: next_billing_period`). `plan` не меняется — на `free` переведёт вебхук по окончании периода. |
+| POST | `/billing/resume` | ✅ | Снять запланированную отмену (`scheduled_change: null`). |
 
 ```
 // Обработка (billing.controller):

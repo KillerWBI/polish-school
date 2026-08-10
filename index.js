@@ -75,7 +75,18 @@ async function start() {
     cron.schedule('0 8 * * *', () => {
       runReminders().catch(e => console.error('[reminders] ошибка:', e.message));
     }, { timezone: 'UTC' });
-    console.log('Планировщик напоминаний запущен (08:00 UTC ежедневно)');
+
+    // Авто-подтверждение посещаемости — раз в час.
+    // Раньше висело на каждом GET /attendance (UPDATE по всей таблице при открытии журнала).
+    // Плюс один прогон на старте: инстанс может проспать час, а запись не должна залипать.
+    const { autoConfirmExpired } = require('./src/services/attendanceAutoConfirm');
+    const runAutoConfirm = () => autoConfirmExpired()
+      .then(n => { if (n) console.log(`[attendance] авто-подтверждено записей: ${n}`); })
+      .catch(e => console.error('[attendance] ошибка авто-подтверждения:', e.message));
+    cron.schedule('7 * * * *', runAutoConfirm, { timezone: 'UTC' });
+    runAutoConfirm();
+
+    console.log('Планировщик запущен (напоминания 08:00 UTC, авто-подтверждение ежечасно)');
   } catch (err) {
     console.error('Ошибка запуска:', err);
     process.exit(1);

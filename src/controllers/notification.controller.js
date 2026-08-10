@@ -1,10 +1,23 @@
 const { Notification } = require('../models');
+const { Op } = require('sequelize');
 
-// GET /notifications — мои уведомления (?unread=true — только непрочитанные) + счётчик непрочитанных
+// Сколько прочитанное уведомление ещё висит в колокольчике.
+// Убирать сразу нельзя: пользователь кликает по списку, и запись исчезала бы под курсором.
+const READ_GRACE_MS = 60 * 60 * 1000; // 1 час
+
+// GET /notifications — лента колокольчика: непрочитанные + прочитанные за последний час.
+// ?unread=true — только непрочитанные. Всё остальное живёт в «Истории событий».
 const list = async (req, res) => {
   try {
     const where = { userId: req.user.id };
-    if (req.query.unread === 'true') where.readAt = null;
+    if (req.query.unread === 'true') {
+      where.readAt = null;
+    } else {
+      where[Op.or] = [
+        { readAt: null },
+        { readAt: { [Op.gt]: new Date(Date.now() - READ_GRACE_MS) } },
+      ];
+    }
 
     const rows = await Notification.findAll({
       where,
@@ -17,6 +30,26 @@ const list = async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Ошибка получения уведомлений' });
+  }
+};
+
+// GET /notifications/history?page=&limit= — полная история событий, включая давно прочитанные
+const history = async (req, res) => {
+  try {
+    const page  = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 30));
+
+    const { rows, count } = await Notification.findAndCountAll({
+      where: { userId: req.user.id },
+      order: [['createdAt', 'DESC']],
+      limit,
+      offset: (page - 1) * limit,
+    });
+
+    res.json({ data: rows, meta: { page, limit, total: count, pages: Math.ceil(count / limit) } });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Ошибка получения истории событий' });
   }
 };
 
@@ -47,4 +80,4 @@ const markAllRead = async (req, res) => {
   }
 };
 
-module.exports = { list, markRead, markAllRead };
+module.exports = { list, history, markRead, markAllRead };

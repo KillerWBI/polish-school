@@ -3,6 +3,7 @@ const auth = require('../middleware/auth');
 const ctrl = require('../controllers/notification.controller');
 
 router.get('/',            auth, ctrl.list);
+router.get('/history',     auth, ctrl.history);
 router.patch('/read-all',  auth, ctrl.markAllRead);
 router.patch('/:id/read',  auth, ctrl.markRead);
 

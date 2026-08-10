@@ -130,6 +130,10 @@ const apiLimiter = rateLimit({
 });
 app.use('/api/v1', apiLimiter);
 
+// CSRF на все мутирующие запросы API (см. middleware/csrf.js — почему double-submit
+// с токеном в теле ответа, а не в читаемой cookie)
+app.use('/api/v1', require('./middleware/csrf').csrf);
+
 // Роуты
 app.use('/api/v1/dashboard',          require('./routes/dashboard.routes'));
 app.use('/api/v1/analytics',          require('./routes/analytics.routes'));
@@ -156,6 +160,7 @@ app.use('/api/v1/materials',          require('./routes/materials.routes'));
 app.use('/api/v1/notifications',      require('./routes/notification.routes'));
 app.use('/api/v1/topics',             require('./routes/topic.routes'));
 app.use('/api/v1/study',              require('./routes/study.routes'));
+app.use('/api/v1/billing',            require('./routes/billing.routes'));
 
 // Глобальный обработчик ошибок
 app.use((err, req, res, next) => {

@@ -4,41 +4,10 @@ const { isHwOwner } = require('../utils/ownership');
 const { getStudentIdsForUser, getTeacherStudentIds } = require('../utils/students');
 const { notifyMany } = require('../utils/notify');
 
-// ── Авто-подтверждение: если студент не ответил за 3 дня — засчитываем как учитель ──
-const autoConfirmExpired = async () => {
-  const cutoff = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-
-  await Attendance.sequelize.query(`
-    UPDATE "Attendances" a
-    SET "studentMarked" = "teacherMarked",
-        "status"        = 'confirmed',
-        "present"       = "teacherMarked",
-        "updatedAt"     = NOW()
-    FROM "Lessons" l
-    WHERE a."lessonId" = l.id
-      AND a."status" = 'pending_student'
-      AND l."date" < :cutoff
-  `, { replacements: { cutoff } });
-
-  await Attendance.sequelize.query(`
-    UPDATE "Attendances" a
-    SET "studentMarked" = "teacherMarked",
-        "status"        = 'confirmed',
-        "present"       = "teacherMarked",
-        "updatedAt"     = NOW()
-    FROM "IndividualLessons" il
-    WHERE a."individualLessonId" = il.id
-      AND a."status" = 'pending_student'
-      AND il."date" < :cutoff
-  `, { replacements: { cutoff } });
-};
-
 // ── GET /attendance — история для текущего пользователя ──────────────────────────
+// Просроченные pending-записи закрывает крон (services/attendanceAutoConfirm.js), не этот GET.
 const getAll = async (req, res) => {
   try {
-    // Сначала авто-подтверждаем просроченные pending-записи (ленивая обработка)
-    await autoConfirmExpired();
-
     const where = {};
     if (req.user.role === 'student') {
       where.studentId = await getStudentIdsForUser(req.user.id); // все Student-записи пользователя
@@ -123,8 +92,6 @@ const getAll = async (req, res) => {
 // Учитель: pending_student + disputed записи по его урокам
 const getPending = async (req, res) => {
   try {
-    await autoConfirmExpired();
-
     let records;
 
     if (req.user.role === 'student') {
