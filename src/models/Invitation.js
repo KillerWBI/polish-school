@@ -18,10 +18,16 @@ const Invitation = sequelize.define('Invitation', {
     type: DataTypes.UUID,
     allowNull: false,
   },
+  // Кого зовём. Либо уже зарегистрированного (inviteeUserId), либо ещё нет —
+  // тогда известен только email, а userId проставится при регистрации по ссылке.
   inviteeUserId: {
     type: DataTypes.UUID,
-    allowNull: false,
+    allowNull: true,
   },
+  inviteeEmail: { type: DataTypes.STRING, allowNull: true },
+  // Одноразовый токен для ссылки в письме. Уникален — по нему ищем приглашение.
+  token:        { type: DataTypes.STRING(64), allowNull: true, unique: true },
+  expiresAt:    { type: DataTypes.DATE, allowNull: true },
   status: {
     type: DataTypes.ENUM('pending', 'accepted', 'declined', 'revoked'),
     allowNull: false,

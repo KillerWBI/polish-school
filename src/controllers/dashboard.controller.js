@@ -1,7 +1,7 @@
 const {
   Group, GroupStudent, Lesson, IndividualLesson,
   Homework, HomeworkSubmission, Attendance, PaymentRecord, User, Student,
-  StudentLessonLog,
+  StudentLessonLog, StudentTeacher,
 } = require('../models');
 const { Op } = require('sequelize');
 const { getTeacherDebtTotal, getStudentDebtTotal } = require('./payment.controller');
@@ -126,6 +126,11 @@ const buildTeacherDashboard = async (teacherId) => {
     .sort((a, b) => (`${a.date}T${a.time}` < `${b.date}T${b.time}` ? -1 : 1))
     .slice(0, 5);
 
+  // Преподавателя позвал его же ученик — покажем это, пока кабинет пуст.
+  // Смысл подсказки: новый человек видит не «начните с нуля», а конкретного ученика,
+  // который уже ведёт у него занятия, и понимает, зачем ему этот кабинет.
+  const invitedBy = await getInviterHint(teacherId);
+
   return {
     role: 'teacher',
     kpi: {
@@ -136,7 +141,30 @@ const buildTeacherDashboard = async (teacherId) => {
     },
     upcomingLessons,
     ungradedList,
+    invitedBy,
   };
+};
+
+/**
+ * Кто позвал этого преподавателя — только пока у него нет ни одного ученика.
+ * Появился первый — подсказка исчезает сама: она про старт, а не про историю.
+ */
+const getInviterHint = async (teacherId) => {
+  const teacher = await User.findByPk(teacherId, { attributes: ['invitedByUserId'] });
+  if (!teacher?.invitedByUserId) return null;
+
+  const hasStudents = await Student.count({ where: { teacherId } });
+  if (hasStudents) return null;
+
+  const inviter = await User.findByPk(teacher.invitedByUserId, { attributes: ['id', 'name'] });
+  if (!inviter) return null;
+
+  // Что именно ученик уже отмечал — чтобы подсказка была про дело, а не про знакомство
+  const card = await StudentTeacher.findOne({
+    where: { userId: inviter.id, linkedUserId: teacherId },
+    attributes: ['subject'],
+  });
+  return { name: inviter.name, subject: card?.subject || null };
 };
 
 /* ════════════════════════════════════════════════════════════════════════
@@ -153,9 +181,16 @@ const buildStudentDashboard = async (userId) => {
   const monthEnd     = new Date(Date.UTC(year, mon, 0)).toISOString().slice(0, 10);
   const next7Days    = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
-  // Долг — по каждой Student-записи независимо, ни от чего ниже не зависит
+  // Долг — по каждой Student-записи независимо, ни от чего ниже не зависит.
+  // Складываем корзины валют, а не числа: у ученика может быть долг в PLN одному
+  // преподавателю и в EUR другому. Сведение к одной цифре делает фронт по курсу.
   const myDebtPromise = Promise.all(studentId.map(sid => getStudentDebtTotal(sid)))
-    .then(arr => arr.reduce((a, b) => a + b, 0));
+    .then(list => list.reduce((acc, byCurrency) => {
+      for (const [cur, amount] of Object.entries(byCurrency)) {
+        acc[cur] = (acc[cur] ?? 0) + amount;
+      }
+      return acc;
+    }, {}));
 
   // Группы студента
   const memberships = await GroupStudent.findAll({ where: { studentId }, attributes: ['groupId'] });
@@ -287,7 +322,11 @@ const buildStudentDashboard = async (userId) => {
       lessonsThisWeek,
       pendingHomework: pendingHwCount,
       attendancePercent,
-      myDebt: Math.round(myDebt * 100) / 100,
+      // Долг разбивкой по валютам: { PLN: 500, EUR: 40 }. Одной цифрой отдать нельзя —
+      // сложение валют бессмысленно, сведение по курсу делает фронт.
+      myDebt: Object.fromEntries(
+        Object.entries(myDebt).map(([cur, amt]) => [cur, Math.round(amt * 100) / 100]),
+      ),
     },
     upcomingLessons,
     pendingHomework: pendingHwList,

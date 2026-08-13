@@ -31,6 +31,19 @@ const User = sequelize.define('User', {
     allowNull: false,
     defaultValue: true,
   },
+  // Кто привёл этого пользователя (виральная петля). Без атрибуции невозможно
+  // понять, работают ли приглашения, — и решения по росту делались бы вслепую.
+  invitedByUserId: { type: DataTypes.UUID, allowNull: true },
+  // Токен подписки на .ics-календарь. Выдаётся по кнопке «Подписаться», не всем сразу:
+  // ссылку запрашивает сервер Google/Apple без авторизации, поэтому секрет — сама ссылка.
+  calendarToken: { type: DataTypes.STRING(64), allowNull: true, unique: true },
+  // Валюта преподавателя (ISO-4217). В ней хранятся и считаются все его цены,
+  // начисления и оплаты. Ученику показывается она же + справочное «≈» в его валюте.
+  currency: {
+    type: DataTypes.STRING(3),
+    allowNull: false,
+    defaultValue: 'PLN',
+  },
   // Тариф учителя (SaaS-подписка). Управляется вебхуками Paddle (billing).
   plan: {
     type: DataTypes.ENUM('free', 'basic', 'pro', 'school'),

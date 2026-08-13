@@ -6,6 +6,7 @@ const { sendVerificationEmail, sendPasswordResetEmail } = require('../services/e
 const { validateEmail } = require('../services/emailValidator');
 const { generateUsername } = require('../utils/username');
 const { issueCsrfToken, clearCsrfToken } = require('../middleware/csrf');
+const { acceptInviteToken } = require('../utils/acceptInvite');
 
 // access-токен (короткоживущий, в теле ответа → localStorage/Bearer).
 // Дефолт 1ч: при XSS-краже окно мало, refresh-cookie (30д) продлевает сессию.
@@ -91,6 +92,7 @@ const userResponse = (user) => ({
   email:         user.email,
   role:          user.role,
   plan:          user.plan,
+  currency:      user.currency, // валюта преподавателя — в ней все его суммы
   emailVerified: user.emailVerified,
   avatar:        user.avatar,
 });
@@ -109,6 +111,9 @@ const register = async (req, res) => {
     }
 
     const user  = await createUserWithVerification({ name, email, password, role: 'student' });
+    // Пришёл по ссылке из письма — сразу оказывается в группе, куда его звали,
+    // без второго шага «найдите приглашение и примите».
+    await acceptInviteToken(user, req.body.invite);
     const token = signToken(user);
     setRefreshCookie(res, user);
     setAccessCookie(res, token);
@@ -197,7 +202,7 @@ const me = async (req, res) => {
   try {
     const user = await User.findByPk(req.user.id, {
       attributes: [
-        'id', 'name', 'username', 'email', 'role', 'plan', 'emailVerified',
+        'id', 'name', 'username', 'email', 'role', 'plan', 'currency', 'emailVerified',
         'avatar', 'coverImage', 'bio',
         'socialTelegram', 'socialWhatsApp', 'socialLinkedIn', 'socialInstagram', 'phone',
         'languages', 'paymentDetails',
@@ -227,6 +232,8 @@ const registerTeacher = async (req, res) => {
     }
 
     const user  = await createUserWithVerification({ name, email, password, role: 'teacher' });
+    // Преподавателя мог позвать его ученик — связываем карточку с новым аккаунтом
+    await acceptInviteToken(user, req.body.invite);
     const token = signToken(user);
     setRefreshCookie(res, user);
     setAccessCookie(res, token);

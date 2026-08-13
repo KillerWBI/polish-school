@@ -14,7 +14,7 @@ const PUBLIC_PROFILE_FIELDS = [
 const EDITABLE_PROFILE_FIELDS = [
   'name', 'username', 'avatar', 'coverImage', 'bio',
   'socialTelegram', 'socialWhatsApp', 'socialLinkedIn', 'socialInstagram', 'phone', 'languages',
-  'paymentDetails',
+  'paymentDetails', 'currency',
 ];
 
 const USERNAME_RE = /^[a-z0-9_]{3,40}$/;

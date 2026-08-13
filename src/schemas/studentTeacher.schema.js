@@ -18,4 +18,10 @@ const updateStudentTeacher = z.object({
   notes:          z.string().trim().max(2000).nullable().optional(),
 });
 
-module.exports = { createStudentTeacher, updateStudentTeacher };
+// POST /student-teachers/:id/invite — позвать преподавателя на платформу
+const inviteStudentTeacher = z.object({
+  email: z.string().trim().toLowerCase().pipe(z.email('Неверный email')),
+});
+
+module.exports = {
+  inviteStudentTeacher, createStudentTeacher, updateStudentTeacher };
