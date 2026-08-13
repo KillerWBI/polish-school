@@ -156,6 +156,7 @@ app.use('/api/v1/vocab',              require('./routes/vocab.routes'));
 app.use('/api/v1/my-lessons',         require('./routes/studentLessonLog.routes'));
 app.use('/api/v1/student-teachers',   require('./routes/studentTeacher.routes'));
 app.use('/api/v1/invoices',           require('./routes/invoice.routes'));
+app.use('/api/v1/push',               require('./routes/push.routes'));
 app.use('/api/v1/notes',              require('./routes/studentNote.routes'));
 app.use('/api/v1/materials',          require('./routes/materials.routes'));
 app.use('/api/v1/notifications',      require('./routes/notification.routes'));
