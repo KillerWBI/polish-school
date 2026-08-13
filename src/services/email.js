@@ -281,4 +281,90 @@ const sendSupportReplyEmail = async (to, name, { subject, reply }) => {
   return result.data;
 };
 
-module.exports = { sendVerificationEmail, sendPasswordResetEmail, sendLessonRequestEmail, sendLessonReminderEmail, sendHomeworkReminderEmail, sendSupportReplyEmail };
+/* ─────────────────────────────────────────────────────────────────────────────
+   Приглашения — обе виральные петли.
+
+   Оба письма ведут на регистрацию с токеном в адресе: человек нажимает кнопку,
+   заводит аккаунт и СРАЗУ оказывается там, куда его звали. Без токена пришлось бы
+   делать второй шаг («теперь найдите приглашение и примите его»), а каждый лишний
+   шаг между письмом и результатом теряет часть людей.
+   ───────────────────────────────────────────────────────────────────────────── */
+
+// Общий каркас письма-приглашения: заголовок, пояснение, кнопка, запасная ссылка.
+const inviteTemplate = ({ title, lead, cta, url, note }) => `
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8" /><title>${title} — Diklario</title></head>
+<body style="margin:0;padding:0;background:#0F1629;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#0F1629;">
+    <tr><td align="center" style="padding:40px 20px;">
+      <table role="presentation" width="520" cellpadding="0" cellspacing="0" border="0" style="max-width:520px;background:#141D35;border-radius:16px;overflow:hidden;border:1px solid rgba(255,255,255,0.08);">
+        <tr><td style="padding:32px 32px 24px;text-align:center;">
+          <h1 style="color:white;font-size:22px;font-weight:600;margin:0 0 12px;">${title}</h1>
+          <p style="color:#94a3b8;font-size:14px;line-height:1.6;margin:0;">${lead}</p>
+        </td></tr>
+        <tr><td style="padding:0 32px 32px;text-align:center;">
+          <a href="${url}" style="display:inline-block;padding:14px 32px;background:#6366f1;color:white;font-size:15px;font-weight:600;text-decoration:none;border-radius:12px;">${cta}</a>
+          <p style="color:#64748b;font-size:12px;margin:24px 0 0;line-height:1.5;">
+            ${note}<br/><span style="color:#6366f1;word-break:break-all;">${url}</span>
+          </p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>`;
+
+// Без ключа Resend письмо отправить некуда, но проверить сценарий надо —
+// печатаем ссылку в консоль, как это уже сделано для верификации email.
+const devLink = (label, to, url) => {
+  console.log('\n┌─────────────────────────────────────────────');
+  console.log(`│ EMAIL DEV MODE — ${label}`);
+  console.log(`│ Кому: ${to}`);
+  console.log(`│ ${url}`);
+  console.log('└─────────────────────────────────────────────\n');
+  return { id: 'dev-mode', dev: true };
+};
+
+// Учитель → ученику: «вас пригласили в группу»
+const sendStudentInviteEmail = async (to, { teacherName, groupName, token }) => {
+  const url = `${CLIENT_URL}/register-student?invite=${token}`;
+  if (!resend) return devLink('приглашение ученику', to, url);
+
+  const result = await resend.emails.send({
+    from: FROM,
+    to,
+    subject: `${teacherName} приглашает вас в группу «${groupName}»`,
+    html: inviteTemplate({
+      title: 'Вас пригласили на занятия',
+      lead: `${teacherName} приглашает вас в группу «${groupName}». Внутри — расписание, домашние задания, оценки и баланс. Аккаунт создаётся за минуту.`,
+      cta: 'Принять приглашение',
+      url,
+      note: 'Ссылка действует 14 дней. Если кнопка не работает, скопируйте адрес:',
+    }),
+  });
+  if (result.error) throw new Error(result.error.message || 'Resend error');
+  return result.data;
+};
+
+// Ученик → преподавателю: «ваш ученик зовёт вас на платформу»
+const sendTeacherInviteEmail = async (to, { studentName, subject, token }) => {
+  const url = `${CLIENT_URL}/register?invite=${token}`;
+  if (!resend) return devLink('приглашение преподавателю', to, url);
+
+  const subjectPart = subject ? ` по предмету «${subject}»` : '';
+  const result = await resend.emails.send({
+    from: FROM,
+    to,
+    subject: `${studentName} приглашает вас в Diklario`,
+    html: inviteTemplate({
+      title: `${studentName} приглашает вас`,
+      lead: `Ваш ученик ведёт учёт занятий${subjectPart} в Diklario и зовёт вас туда же. Для преподавателя это журнал групп, посещаемости, домашних заданий и оплат — в одном месте. Бесплатно на старте.`,
+      cta: 'Посмотреть и зарегистрироваться',
+      url,
+      note: 'Если кнопка не работает, скопируйте адрес:',
+    }),
+  });
+  if (result.error) throw new Error(result.error.message || 'Resend error');
+  return result.data;
+};
+
+module.exports = { sendVerificationEmail, sendPasswordResetEmail, sendLessonRequestEmail, sendLessonReminderEmail, sendHomeworkReminderEmail, sendSupportReplyEmail, sendStudentInviteEmail, sendTeacherInviteEmail };

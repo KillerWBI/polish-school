@@ -3,7 +3,7 @@ const auth = require('../middleware/auth');
 const { isTeacher } = require('../middleware/role');
 const { validate } = require('../middleware/validate');
 const { createGroup, updateGroup, addStudent, addPlaceholder } = require('../schemas/group.schema');
-const { createInvitation } = require('../schemas/invitation.schema');
+const { createInvitation, bulkInvitation } = require("../schemas/invitation.schema");
 const ctrl = require('../controllers/group.controller');
 const invitationCtrl = require('../controllers/invitation.controller');
 
@@ -18,5 +18,7 @@ router.delete('/:id/students/:studentId', auth, isTeacher, ctrl.removeStudent);
 router.post('/:id/generate-lessons', auth, isTeacher, ctrl.generateLessons);
 // С3: пригласить студента (по User.id) в группу — отправитель учитель, получатель студент.
 router.post('/:id/invitations', auth, isTeacher, validate(createInvitation), invitationCtrl.create);
+// Позвать по email тех, кого ещё нет на платформе — виральная петля «учитель → класс»
+router.post('/:id/invitations/bulk', auth, isTeacher, validate(bulkInvitation), invitationCtrl.bulkInvite);
 
 module.exports = router;

@@ -9,6 +9,11 @@ const { isAllowedUploadUrl } = require('../utils/cloudinary');
 // с одними лишь разовыми инд.уроками (individualCourseId=null) и учеников, убранных из групп
 // (но с историей долга). Таблица Student покрывает всех учеников ростера.
 
+// Долг ученика — РАЗБИВКОЙ ПО ВАЛЮТАМ: { PLN: 500, EUR: 40 }.
+// Раньше возвращалось одно число: долги всех преподавателей складывались подряд.
+// Пока валюта была одна на всех, это работало; с валютой преподавателя такое
+// сложение даёт бессмыслицу (100 PLN + 20 EUR = 120 «чего-то»). Свести к одной
+// цифре можно только по курсу — а это уже показ, и он живёт на фронте.
 const getStudentDebtTotal = async (studentId) => {
   // Начислено по каждому учителю (из посещений)
   const charged = await computeChargedByTeacher(studentId);
@@ -22,15 +27,27 @@ const getStudentDebtTotal = async (studentId) => {
   for (const r of records) {
     paid.set(r.teacherId, (paid.get(r.teacherId) ?? 0) + parseFloat(r.amount));
   }
-  // Вычисляем долг по каждому учителю: сколько начислено минус сколько оплачено.
-  const debt = {};
-  for (const [teacherId, amount] of charged) {
-    debt[teacherId] = amount - (paid.get(teacherId) ?? 0);
+
+  const teacherIds = [...new Set([...charged.keys(), ...paid.keys()])];
+  if (!teacherIds.length) return {};
+
+  const teachers = await User.findAll({
+    where: { id: teacherIds },
+    attributes: ['id', 'currency'],
+  });
+  const currencyOf = new Map(teachers.map(t => [t.id, t.currency || 'PLN']));
+
+  // Долг по каждому учителю → в корзину его валюты.
+  // Переплата не уводит в минус на уровне ОДНОГО преподавателя: иначе аванс одному
+  // маскировал бы долг другому в той же валюте.
+  const byCurrency = {};
+  for (const teacherId of teacherIds) {
+    const amount = (charged.get(teacherId) ?? 0) - (paid.get(teacherId) ?? 0);
+    if (amount <= 0) continue;
+    const cur = currencyOf.get(teacherId) || 'PLN';
+    byCurrency[cur] = (byCurrency[cur] ?? 0) + amount;
   }
-
-  const allAmount = Object.values(debt).reduce( (sum, amt) => sum + amt , 0);
-  return Math.max(allAmount, 0); // переплата не уводит долг в минус
-
+  return byCurrency;
 };
 
 // Три пакетных запроса: начислено и оплачено по каждому ученику для данного учителя.
@@ -315,7 +332,7 @@ const getDebt = async (req, res) => {
 
     const teachers = await User.findAll({
       where: { id: teacherIds },
-      attributes: ['id', 'name', 'email'],
+      attributes: ['id', 'name', 'email', 'currency'],
     });
     const teacherMap = new Map(teachers.map(t => [t.id, t]));
 
@@ -324,6 +341,9 @@ const getDebt = async (req, res) => {
       const paidAmt    = paid.get(teacherId) ?? 0;
       return {
         teacher: teacherMap.get(teacherId),
+        // Валюта преподавателя: суммы ниже — в ней. Ученик может учиться у двоих
+        // с разными валютами, поэтому она идёт в каждой строке, а не одна на ответ.
+        currency: teacherMap.get(teacherId)?.currency || 'PLN',
         charged: chargedAmt,
         paid:    paidAmt,
         balance: chargedAmt - paidAmt,
@@ -384,10 +404,15 @@ const getTeacherPaymentInfo = async (req, res) => {
     }
 
     const teacher = await User.findByPk(teacherId, {
-      attributes: ['id', 'name', 'paymentDetails'],
+      attributes: ['id', 'name', 'paymentDetails', 'currency'],
     });
     if (!teacher) return res.status(404).json({ error: 'Преподаватель не найден' });
-    res.json({ data: { id: teacher.id, name: teacher.name, paymentDetails: teacher.paymentDetails || {} } });
+    res.json({ data: {
+      id: teacher.id,
+      name: teacher.name,
+      currency: teacher.currency,          // в ней ученик платит и видит суммы
+      paymentDetails: teacher.paymentDetails || {},
+    } });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Ошибка получения данных' });

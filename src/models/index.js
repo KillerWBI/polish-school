@@ -17,6 +17,7 @@ const VocabItem = require('./VocabItem');
 const StudentLessonLog = require('./StudentLessonLog');
 const StudentNote = require('./StudentNote');
 const StudentTeacher = require('./StudentTeacher');
+const Invoice = require('./Invoice');
 const Notification = require('./Notification');
 const Topic = require('./Topic');
 const TrackCard = require('./TrackCard');
@@ -123,6 +124,12 @@ Topic.hasMany(TrackCard, { foreignKey: 'topicId', as: 'cards', onDelete: 'CASCAD
 TrackCard.belongsTo(Topic, { foreignKey: 'topicId', as: 'topic' });
 TrackCard.belongsTo(User, { foreignKey: 'userId', as: 'owner' });
 
+// Invoice ↔ User (кто выставил) / Student (кому) / PaymentRecord (чем закрыт)
+Invoice.belongsTo(User, { foreignKey: 'teacherId', as: 'teacher' });
+Invoice.belongsTo(Student, { foreignKey: 'studentId', as: 'student' });
+PaymentRecord.belongsTo(Invoice, { foreignKey: 'invoiceId', as: 'invoice' });
+Invoice.hasMany(PaymentRecord, { foreignKey: 'invoiceId', as: 'payments' });
+
 // TrackSource ↔ Topic (источники к шагам трека, каскад)
 Topic.hasMany(TrackSource, { foreignKey: 'topicId', as: 'sources', onDelete: 'CASCADE' });
 TrackSource.belongsTo(Topic, { foreignKey: 'topicId', as: 'topic' });
@@ -151,4 +158,5 @@ module.exports = {
   Topic,
   TrackCard,
   TrackSource,
+  Invoice,
 };

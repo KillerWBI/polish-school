@@ -1,4 +1,6 @@
-const { StudentTeacher, StudentLessonLog } = require('../models');
+const crypto = require('crypto');
+const { StudentTeacher, StudentLessonLog, User } = require('../models');
+const { sendTeacherInviteEmail } = require('../services/email');
 
 // «Мои преподаватели» — карточки, которые ученик завёл сам (репетитор офлайн, школа, курсы,
 // самостоятельные занятия по предмету). Границы жёсткие: видно и правится только своё.
@@ -97,4 +99,53 @@ const remove = async (req, res) => {
   }
 };
 
-module.exports = { list, create, update, remove };
+/**
+ * POST /student-teachers/:id/invite — позвать своего офлайн-преподавателя на платформу.
+ *
+ * Виральная петля: ученик уже ведёт здесь учёт занятий с этим человеком, и ему выгодно,
+ * чтобы преподаватель завёл кабинет — тогда занятия, оплаты и ДЗ станут общими,
+ * а не односторонней записью в блокноте.
+ *
+ * Адрес не храним в карточке заранее: он нужен только в момент отправки, и просить
+ * его при заведении карточки означало бы лишнее поле у всех, включая тех, кто зовёт
+ * не человека, а «самостоятельные занятия».
+ */
+const invite = async (req, res) => {
+  try {
+    const { email } = req.body; // проверен схемой
+
+    const card = await StudentTeacher.findByPk(req.params.id);
+    if (!card) return res.status(404).json({ error: 'Карточка не найдена' });
+    if (card.userId !== req.user.id) return res.status(403).json({ error: 'Доступ запрещён' });
+    if (card.linkedUserId) return res.status(400).json({ error: 'Этот преподаватель уже на платформе' });
+
+    // Уже зарегистрирован — приглашать некуда, сразу связываем карточку с аккаунтом.
+    // Роль проверяем: ученик мог вписать адрес другого ученика.
+    const existing = await User.findOne({ where: { email }, attributes: ['id', 'role'] });
+    if (existing?.role === 'teacher') {
+      await card.update({ inviteEmail: email, linkedUserId: existing.id });
+      return res.json({ data: { status: 'linked' } });
+    }
+
+    // Токен одноразовый в том смысле, что гасится при регистрации (linkedUserId != null).
+    // Перевыпускаем на каждую отправку: старая ссылка из прошлого письма перестаёт работать.
+    const token = crypto.randomBytes(24).toString('hex');
+    const student = await User.findByPk(req.user.id, { attributes: ['name'] });
+
+    await sendTeacherInviteEmail(email, {
+      studentName: student?.name || 'Ваш ученик',
+      subject: card.subject,
+      token,
+    });
+    // Пишем в карточку только после успешной отправки: иначе «приглашение отправлено»
+    // осталось бы в интерфейсе там, где письмо на самом деле не ушло.
+    await card.update({ inviteEmail: email, inviteToken: token, inviteSentAt: new Date() });
+
+    res.json({ data: { status: 'sent' } });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Не удалось отправить приглашение' });
+  }
+};
+
+module.exports = { list, create, update, remove, invite };

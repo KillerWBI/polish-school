@@ -25,6 +25,12 @@ const StudentTeacher = sequelize.define('StudentTeacher', {
   },
   contact: { type: DataTypes.STRING, allowNull: true },   // телефон/телеграм/почта — как удобно
   notes:   { type: DataTypes.TEXT, allowNull: true },
+  // Приглашение преподавателя на платформу: ученик вводит email, тот получает письмо.
+  inviteEmail:  { type: DataTypes.STRING, allowNull: true },
+  inviteToken:  { type: DataTypes.STRING(64), allowNull: true, unique: true },
+  inviteSentAt: { type: DataTypes.DATE, allowNull: true },
+  // Заполняется, когда приглашённый зарегистрировался — чтобы не звать повторно
+  linkedUserId: { type: DataTypes.UUID, allowNull: true },
 });
 
 module.exports = StudentTeacher;

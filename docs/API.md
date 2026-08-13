@@ -631,6 +631,7 @@ GET /users/@ivan_petrov/profile
 | Method | Path | Auth | Role | Описание |
 |--------|------|------|------|----------|
 | POST | `/groups/:id/invitations` | ✅ | teacher | Пригласить студента (по `User.id`) в группу |
+| POST | `/groups/:id/invitations/bulk` | ✅ | teacher | Позвать по email до 50 человек, которых ещё нет на платформе |
 | GET | `/invitations` | ✅ | teacher/student | Список (роль-свитч: учитель — исходящие, студент — входящие); фильтр `?status=` |
 | PATCH | `/invitations/:id` | ✅ | student | Принять (`accepted`) или отклонить (`declined`) приглашение |
 | DELETE | `/invitations/:id` | ✅ | teacher | Отменить своё ещё не принятое приглашение |
@@ -653,9 +654,34 @@ GET /users/@ivan_petrov/profile
 //         400 уже в группе / приглашение уже отправлено (анти-дубль pending)
 ```
 
+### POST /groups/:id/invitations/bulk
+Виральная петля «учитель → класс»: позвать по email тех, у кого ещё нет аккаунта.
+Обычный `POST /invitations` умеет звать только зарегистрированных (пишет `inviteeUserId`);
+здесь приглашение живёт по `inviteeEmail` + `token`, а `inviteeUserId` проставится при регистрации.
+```json
+// Body (Zod bulkInvitation): адреса приводятся к нижнему регистру и дедуплицируются схемой
+{ "emails": ["anna@example.com", "piotr@example.com"] }   // 1..50
+
+// Response 201 — итог ПО КАЖДОМУ адресу, а не «ок/не ок» на всю пачку:
+// из десяти адресов один почти всегда с опечаткой, и учителю нужно видеть — какой.
+{ "data": [
+  { "email": "anna@example.com",  "status": "sent" },      // письмо ушло
+  { "email": "piotr@example.com", "status": "notified" },  // уже на платформе → уведомление в приложении
+  { "email": "old@example.com",   "status": "already" },   // приглашение уже висит
+  { "email": "typo@nowhere",      "status": "failed" },    // письмо не доставлено
+  { "email": "extra@example.com", "status": "limit" }      // упёрлись в лимит тарифа
+] }
+
+// Лимит тарифа считается ОДИН раз до рассылки (ученики + pending-приглашения)
+// и уменьшается по ходу: иначе письма ушли бы, а мест не осталось — отозвать их уже нельзя.
+// Токен живёт 14 дней, ссылка → CLIENT_URL/register-student?invite=TOKEN
+// Ошибки: 404 группа не найдена; 403 чужая группа
+```
+
 ### GET /invitations
 ```json
 // Учитель видит исходящие (include invitee+Group), студент — входящие (include teacher+Group)
+// У приглашений по email invitee = null, вместо имени показывается inviteeEmail
 // ?status=pending|accepted|declined|revoked — опциональный фильтр
 { "data": [{ "id", "teacherId", "groupId", "inviteeUserId", "status", "teacher"|"invitee", "Group" }] }
 ```
@@ -776,6 +802,23 @@ GET /users/@ivan_petrov/profile
 | PATCH | `/my-lessons/:id/pay` | ✅ | student | Отметить оплаченным |
 | GET | `/student-teachers` | ✅ | student | «Мои преподаватели» + сводка `lessons`/`debt` по каждому |
 | POST/PUT/DELETE | `/student-teachers/:id?` | ✅ | student | CRUD карточек |
+| POST | `/student-teachers/:id/invite` | ✅ | student | Позвать своего офлайн-преподавателя на платформу |
+
+### POST /student-teachers/:id/invite
+Виральная петля «ученик → учитель». Email спрашивается в момент отправки, а не хранится в карточке:
+он не нужен тем, кто завёл карточку «самостоятельные занятия».
+```json
+// Body: { "email": "teacher@example.com" }
+
+// Response 200
+{ "data": { "status": "sent" } }     // письмо ушло, в карточке inviteToken + inviteSentAt
+{ "data": { "status": "linked" } }   // такой преподаватель уже есть → карточка связана, письма нет
+
+// Токен перевыпускается на каждую отправку (старая ссылка перестаёт работать) и гасится
+// при регистрации: utils/acceptInvite.js ставит StudentTeacher.linkedUserId и User.invitedByUserId.
+// История занятий преподавателю НЕ переносится — это записи ученика о своих деньгах.
+// Ошибки: 404 карточка не найдена; 403 чужая карточка; 400 преподаватель уже на платформе
+```
 | GET/POST | `/notes` | ✅ | student | Заметки (фильтр `?lessonId=`) |
 | PUT/DELETE | `/notes/:id` | ✅ | student | Редактировать/удалить заметку |
 | GET | `/students/me/progress` | ✅ | student | Прогресс-центр: streak, активность по дням, словарь, внешние занятия |
@@ -949,6 +992,49 @@ Query: ?cursor=&limit=   (limit 1..50, default 10)
 // Плохая подпись → 401. Ошибка парсинга → 200 (чтобы Paddle не ретраил).
 ```
 > **Env:** `PADDLE_WEBHOOK_SECRET`, `PADDLE_PRICE_PRO`, `PADDLE_PRICE_SCHOOL` (map price→plan). Фронт: `VITE_PADDLE_ENV/CLIENT_TOKEN/PRICE_PRO` (Paddle.js overlay на `/plans`). Тестируется в **Sandbox** (локально вебхук — через ngrok). Прод: сменить URL вебхука на домен + Production-ключи.
+
+---
+
+## Invoices (счета на оплату)
+
+Счёт — **снимок** расчёта за период, а не вид на текущий долг: позиции и валюта копируются
+в документ при выпуске, поэтому правка цены группы задним числом его не меняет.
+Модель денег прежняя — постоплата; счёт лишь оформляет уже начисленное.
+
+| Метод | Путь | Auth | Роль | Описание |
+|-------|------|------|------|----------|
+| GET | `/invoices` | ✅ | teacher/student | Роль-свитч: выставленные мной / выставленные мне |
+| GET | `/invoices/preview` | ✅ | teacher | Расчёт до выпуска: `?studentId=&from=&to=` |
+| GET | `/invoices/:id` | ✅ | обе стороны счёта | Документ целиком (для печати) |
+| POST | `/invoices` | ✅ | teacher | Выставить счёт |
+| PATCH | `/invoices/:id` | ✅ | teacher | `paid` или `cancelled` |
+| DELETE | `/invoices/:id` | ✅ | teacher | Только уже отозванный |
+
+### POST /invoices
+```json
+// Body (Zod createInvoice)
+{ "studentId": "uuid", "from": "2026-07-01", "to": "2026-07-31",
+  "dueDate": "2026-08-10", "note": "необязательно" }
+
+// Позиции собирает buildPositions — по строке на каждое посещение с present: true
+// за период, у групповых цена из Group, у индивидуальных из IndividualLesson.
+// Это НЕ fetchChargesAndPayments: тот даёт итог без разбивки и без периода.
+
+// Response 201
+{ "data": { "id", "number": 7, "currency": "PLN", "periodFrom", "periodTo", "issuedAt",
+            "dueDate", "positions": [{ "date", "title", "price" }], "total", "status": "issued" } }
+
+// Нумерация: MAX(number)+1 у этого преподавателя + уникальный индекс (teacherId, number).
+// Два одновременных запроса возьмут одно число, второй упадёт на индексе → повтор (до 5 раз).
+// Это дешевле блокировки таблицы и не мешает другим преподавателям.
+// Ошибки: 404 ученик не найден; 403 чужой ученик;
+//         400 за период нет занятий; 409 не удалось присвоить номер
+```
+
+> **PDF генерирует браузер, а не сервер.** Встроенные шрифты `pdfkit` — Latin-1: ни кириллицы,
+> ни `ą ć ę ł ż`. Пришлось бы класть в репозиторий TTF на все 7 языков интерфейса. Страница
+> `/invoices/:id` + `@media print` в `index.css` даёт тот же PDF любым системным шрифтом.
+> Причина ставить генератор появится, если понадобится **отправлять** PDF письмом.
 
 ---
 

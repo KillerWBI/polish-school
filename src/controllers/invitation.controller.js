@@ -1,8 +1,23 @@
+const crypto = require('crypto');
 const { Invitation, Group, User, Student, GroupStudent, TeacherStudent } = require('../models');
 const { resolveStudent } = require('../utils/students');
 const { createNotification } = require('../utils/notify');
+const { sendStudentInviteEmail } = require('../services/email');
+const { LIMITS } = require('../config/planLimits');
 
 const USER_BRIEF = ['id', 'name', 'username', 'avatar'];
+
+// Приглашение живёт две недели: за это время человек либо принял, либо уже не примет,
+// а утёкшая ссылка перестаёт работать сама.
+const INVITE_TTL_DAYS = 14;
+
+// Сколько учеников ещё можно добавить в рамках тарифа. Отправленные, но не принятые
+// приглашения считаем занятыми местами — иначе можно разослать больше, чем влезет.
+const remainingStudents = (plan, used) => {
+  const max = LIMITS?.teacher?.[plan || 'free']?.students;
+  if (!max) return Number.MAX_SAFE_INTEGER; // лимит не задан — не ограничиваем
+  return Math.max(0, max - used);
+};
 
 // POST /groups/:id/invitations — учитель приглашает студента (по User.id) в группу.
 // Если приглашаемый уже «свой» реальный ученик (есть Student{userId} у этого учителя,
@@ -157,4 +172,88 @@ const remove = async (req, res) => {
   }
 };
 
-module.exports = { create, getAll, patch, remove };
+/**
+ * POST /groups/:id/invitations/bulk — позвать в группу по email тех, кого ещё нет.
+ *
+ * Существующий `create` умеет звать только зарегистрированных: ищет по нику и пишет
+ * `inviteeUserId`. Здесь аккаунта ещё нет, поэтому приглашение живёт по email + токену,
+ * а userId проставится, когда человек зарегистрируется по ссылке из письма.
+ *
+ * Возвращает построчный результат по каждому адресу, а не «ок/не ок» на всю пачку:
+ * из десяти адресов один почти всегда с опечаткой, и учителю нужно видеть — какой.
+ */
+const bulkInvite = async (req, res) => {
+  try {
+    const groupId = req.params.id;
+    const { emails } = req.body; // массив, нормализован схемой
+
+    const group = await Group.findByPk(groupId);
+    if (!group) return res.status(404).json({ error: 'Группа не найдена' });
+    if (group.teacherId !== req.user.id) return res.status(403).json({ error: 'Доступ запрещён' });
+
+    const teacher = await User.findByPk(req.user.id, { attributes: ['id', 'name', 'plan'] });
+
+    // Лимит тарифа считаем ОДИН раз до рассылки и уменьшаем по ходу: иначе учитель
+    // на бесплатном тарифе разослал бы сотню приглашений и упёрся в лимит уже после,
+    // когда письма ушли и отозвать их нельзя.
+    const usedStudents = await Student.count({ where: { teacherId: req.user.id } });
+    const pendingCount = await Invitation.count({ where: { teacherId: req.user.id, status: 'pending' } });
+    let budget = remainingStudents(teacher?.plan, usedStudents + pendingCount);
+
+    const results = [];
+    for (const email of emails) {
+      if (budget <= 0) { results.push({ email, status: 'limit' }); continue; }
+
+      // Уже зарегистрирован — обычное приглашение, письмо не нужно:
+      // человек увидит его в приложении, где и так бывает.
+      const existing = await User.findOne({ where: { email }, attributes: ['id'] });
+
+      const [invitation, created] = await Invitation.findOrCreate({
+        where: { teacherId: req.user.id, groupId, inviteeEmail: email, status: 'pending' },
+        defaults: {
+          teacherId: req.user.id,
+          groupId,
+          inviteeEmail: email,
+          inviteeUserId: existing?.id || null,
+          token: crypto.randomBytes(24).toString('hex'),
+          expiresAt: new Date(Date.now() + INVITE_TTL_DAYS * 24 * 60 * 60 * 1000),
+        },
+      });
+      if (!created) { results.push({ email, status: 'already' }); continue; }
+
+      budget--;
+
+      if (existing) {
+        // Уведомление внутри приложения — тот же путь, что у приглашения по нику
+        await createNotification(existing.id, {
+          type: 'invitation_received',
+          title: 'Приглашение в группу',
+          body: `${teacher.name} — «${group.name}»`,
+          link: '/groups',
+        });
+        results.push({ email, status: 'notified' });
+        continue;
+      }
+
+      // Письмо не должно ронять всю рассылку: один плохой адрес — одна плохая строка
+      try {
+        await sendStudentInviteEmail(email, {
+          teacherName: teacher.name,
+          groupName: group.name,
+          token: invitation.token,
+        });
+        results.push({ email, status: 'sent' });
+      } catch (e) {
+        console.error('[invite] письмо не ушло:', email, e.message);
+        results.push({ email, status: 'failed' });
+      }
+    }
+
+    res.status(201).json({ data: results });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Ошибка отправки приглашений' });
+  }
+};
+
+module.exports = { create, getAll, patch, remove, bulkInvite };

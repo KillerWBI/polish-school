@@ -155,12 +155,14 @@ app.use('/api/v1/support',            require('./routes/support.routes'));
 app.use('/api/v1/vocab',              require('./routes/vocab.routes'));
 app.use('/api/v1/my-lessons',         require('./routes/studentLessonLog.routes'));
 app.use('/api/v1/student-teachers',   require('./routes/studentTeacher.routes'));
+app.use('/api/v1/invoices',           require('./routes/invoice.routes'));
 app.use('/api/v1/notes',              require('./routes/studentNote.routes'));
 app.use('/api/v1/materials',          require('./routes/materials.routes'));
 app.use('/api/v1/notifications',      require('./routes/notification.routes'));
 app.use('/api/v1/topics',             require('./routes/topic.routes'));
 app.use('/api/v1/study',              require('./routes/study.routes'));
 app.use('/api/v1/billing',            require('./routes/billing.routes'));
+app.use('/api/v1/calendar',           require('./routes/calendar.routes'));
 
 // Глобальный обработчик ошибок
 app.use((err, req, res, next) => {

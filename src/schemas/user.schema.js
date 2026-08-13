@@ -23,6 +23,9 @@ const updateProfile = z.object({
       level: z.string().trim().optional(),
     })
   ).optional(),
+  // Валюта преподавателя — ISO-4217, три заглавные буквы. Список допустимых значений
+  // держим здесь, а не в ENUM базы: правится деплоем кода, без миграции.
+  currency: z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/, 'currency: код ISO-4217, например PLN').optional(),
   paymentDetails: z.record(z.any()).nullable().optional(),
 });
 

@@ -1,5 +1,5 @@
 const router = require('express').Router();
-const { createStudentTeacher, updateStudentTeacher } = require('../schemas/studentTeacher.schema');
+const { createStudentTeacher, updateStudentTeacher, inviteStudentTeacher } = require('../schemas/studentTeacher.schema');
 const { validate } = require('../middleware/validate');
 const auth = require('../middleware/auth');
 const { isStudent } = require('../middleware/role');
@@ -10,5 +10,7 @@ router.get('/',       auth, isStudent, ctrl.list);
 router.post('/',      auth, isStudent, validate(createStudentTeacher), ctrl.create);
 router.put('/:id',    auth, isStudent, validate(updateStudentTeacher), ctrl.update);
 router.delete('/:id', auth, isStudent, ctrl.remove);
+// Виральная петля «ученик → учитель»: позвать своего офлайн-преподавателя на платформу
+router.post('/:id/invite', auth, isStudent, validate(inviteStudentTeacher), ctrl.invite);
 
 module.exports = router;

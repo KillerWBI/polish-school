@@ -35,6 +35,11 @@ const PaymentRecord = sequelize.define('PaymentRecord', {
     allowNull: false,
     defaultValue: 'manual',
   },
+  // Счёт, который эта оплата закрывает (если платили по счёту, а не «просто так»)
+  invoiceId: {
+    type: DataTypes.UUID,
+    allowNull: true,
+  },
   // Статус модерации: pending (на проверке, в долг не идёт) → approved / rejected.
   // manual/online создаются сразу approved; student-оплата — pending до решения учителя.
   status: {
