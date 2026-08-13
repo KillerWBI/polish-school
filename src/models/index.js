@@ -18,6 +18,7 @@ const StudentLessonLog = require('./StudentLessonLog');
 const StudentNote = require('./StudentNote');
 const StudentTeacher = require('./StudentTeacher');
 const Invoice = require('./Invoice');
+const PushSubscription = require('./PushSubscription');
 const Notification = require('./Notification');
 const Topic = require('./Topic');
 const TrackCard = require('./TrackCard');
@@ -124,6 +125,10 @@ Topic.hasMany(TrackCard, { foreignKey: 'topicId', as: 'cards', onDelete: 'CASCAD
 TrackCard.belongsTo(Topic, { foreignKey: 'topicId', as: 'topic' });
 TrackCard.belongsTo(User, { foreignKey: 'userId', as: 'owner' });
 
+// PushSubscription ↔ User (одно устройство = одна строка, у человека их несколько)
+PushSubscription.belongsTo(User, { foreignKey: 'userId', as: 'owner' });
+User.hasMany(PushSubscription, { foreignKey: 'userId', as: 'pushSubscriptions' });
+
 // Invoice ↔ User (кто выставил) / Student (кому) / PaymentRecord (чем закрыт)
 Invoice.belongsTo(User, { foreignKey: 'teacherId', as: 'teacher' });
 Invoice.belongsTo(Student, { foreignKey: 'studentId', as: 'student' });
@@ -159,4 +164,5 @@ module.exports = {
   TrackCard,
   TrackSource,
   Invoice,
+  PushSubscription,
 };
