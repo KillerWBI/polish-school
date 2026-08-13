@@ -13,7 +13,7 @@ const verificationTemplate = (name, verifyUrl) => `
 <html lang="ru">
 <head>
   <meta charset="utf-8" />
-  <title>Подтвердите email — Diklario</title>
+  <title>Подтвердите email — Peravenor</title>
 </head>
 <body style="margin:0; padding:0; background:#0F1629; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
   <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:#0F1629;">
@@ -26,7 +26,7 @@ const verificationTemplate = (name, verifyUrl) => `
               <h1 style="color:white; font-size:24px; font-weight:600; margin:16px 0 8px;">Подтвердите ваш email</h1>
               <p style="color:#94a3b8; font-size:14px; line-height:1.6; margin:0;">
                 Привет, ${name}!<br/>
-                Спасибо за регистрацию в Diklario. Подтвердите email чтобы получить полный доступ.
+                Спасибо за регистрацию в Peravenor. Подтвердите email чтобы получить полный доступ.
               </p>
             </td>
           </tr>
@@ -44,7 +44,7 @@ const verificationTemplate = (name, verifyUrl) => `
           <tr>
             <td style="padding:20px 32px; background:rgba(255,255,255,0.02); border-top:1px solid rgba(255,255,255,0.06); text-align:center;">
               <p style="color:#475569; font-size:11px; margin:0;">
-                Если вы не регистрировались в Diklario, просто проигнорируйте это письмо.
+                Если вы не регистрировались в Peravenor, просто проигнорируйте это письмо.
               </p>
             </td>
           </tr>
@@ -79,7 +79,7 @@ const sendVerificationEmail = async (to, name, token) => {
   const result = await resend.emails.send({
     from: FROM,
     to,
-    subject: 'Подтвердите email — Diklario',
+    subject: 'Подтвердите email — Peravenor',
     html: verificationTemplate(name, verifyUrl),
   });
 
@@ -119,7 +119,7 @@ const sendPasswordResetEmail = async (to, name, token) => {
   const result = await resend.emails.send({
     from: FROM,
     to,
-    subject: 'Сброс пароля — Diklario',
+    subject: 'Сброс пароля — Peravenor',
     html: `
 <div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif; max-width:520px; margin:0 auto; padding:24px;">
   <h2 style="color:#0F172A;">Сброс пароля</h2>
@@ -162,7 +162,7 @@ const sendLessonRequestEmail = async (to, teacherName, studentName, language) =>
   const result = await resend.emails.send({
     from: FROM,
     to,
-    subject: 'Новая заявка на обучение — Diklario',
+    subject: 'Новая заявка на обучение — Peravenor',
     html: `
 <div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif; max-width:520px; margin:0 auto; padding:24px;">
   <h2 style="color:#141D35;">Новая заявка на обучение</h2>
@@ -190,7 +190,7 @@ const sendLessonReminderEmail = async (to, studentName, { date, time, topic, les
   const result = await resend.emails.send({
     from: FROM,
     to,
-    subject: `Напоминание: урок завтра ${date} ${time} — Diklario`,
+    subject: `Напоминание: урок завтра ${date} ${time} — Peravenor`,
     html: `
 <div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif; max-width:520px; margin:0 auto; padding:24px;">
   <h2 style="color:#0F172A;">Урок завтра 📅</h2>
@@ -223,7 +223,7 @@ const sendHomeworkReminderEmail = async (to, studentName, { description, deadlin
   const result = await resend.emails.send({
     from: FROM,
     to,
-    subject: `Напоминание: дедлайн ДЗ завтра — Diklario`,
+    subject: `Напоминание: дедлайн ДЗ завтра — Peravenor`,
     html: `
 <div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif; max-width:520px; margin:0 auto; padding:24px;">
   <h2 style="color:#0F172A;">Дедлайн домашнего задания завтра ⏰</h2>
@@ -262,7 +262,7 @@ const sendSupportReplyEmail = async (to, name, { subject, reply }) => {
   const result = await resend.emails.send({
     from: FROM,
     to,
-    subject: `Ответ на ваше обращение: ${subject} — Diklario`,
+    subject: `Ответ на ваше обращение: ${subject} — Peravenor`,
     html: `
 <div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif; max-width:520px; margin:0 auto; padding:24px;">
   <h2 style="color:#0F172A;">Ответ службы поддержки</h2>
@@ -293,7 +293,7 @@ const sendSupportReplyEmail = async (to, name, { subject, reply }) => {
 // Общий каркас письма-приглашения: заголовок, пояснение, кнопка, запасная ссылка.
 const inviteTemplate = ({ title, lead, cta, url, note }) => `
 <!doctype html>
-<html lang="ru"><head><meta charset="utf-8" /><title>${title} — Diklario</title></head>
+<html lang="ru"><head><meta charset="utf-8" /><title>${title} — Peravenor</title></head>
 <body style="margin:0;padding:0;background:#0F1629;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#0F1629;">
     <tr><td align="center" style="padding:40px 20px;">
@@ -354,10 +354,10 @@ const sendTeacherInviteEmail = async (to, { studentName, subject, token }) => {
   const result = await resend.emails.send({
     from: FROM,
     to,
-    subject: `${studentName} приглашает вас в Diklario`,
+    subject: `${studentName} приглашает вас в Peravenor`,
     html: inviteTemplate({
       title: `${studentName} приглашает вас`,
-      lead: `Ваш ученик ведёт учёт занятий${subjectPart} в Diklario и зовёт вас туда же. Для преподавателя это журнал групп, посещаемости, домашних заданий и оплат — в одном месте. Бесплатно на старте.`,
+      lead: `Ваш ученик ведёт учёт занятий${subjectPart} в Peravenor и зовёт вас туда же. Для преподавателя это журнал групп, посещаемости, домашних заданий и оплат — в одном месте. Бесплатно на старте.`,
       cta: 'Посмотреть и зарегистрироваться',
       url,
       note: 'Если кнопка не работает, скопируйте адрес:',

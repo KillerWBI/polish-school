@@ -125,21 +125,21 @@ const getIcs = async (req, res) => {
     const events = [
       ...groupLessons.map(l => ({
         // uid стабильный: при следующем обходе календарь обновит событие, а не создаст второе
-        uid: `lesson-${l.id}@diklario`,
+        uid: `lesson-${l.id}@peravenor`,
         date: l.date, time: l.time,
         title: l.topic || l.Group?.name || 'Урок',
         description: l.description,
         url: l.lessonLink || l.Group?.lessonLink || undefined,
       })),
       ...indLessons.map(l => ({
-        uid: `ind-${l.id}@diklario`,
+        uid: `ind-${l.id}@peravenor`,
         date: l.date, time: l.time,
         title: l.topic || l.student?.name || 'Индивидуальный урок',
         description: l.description,
         url: l.lessonLink || undefined,
       })),
       ...ownLessons.map(l => ({
-        uid: `own-${l.id}@diklario`,
+        uid: `own-${l.id}@peravenor`,
         date: l.date, time: l.time, durationMin: l.durationMin,
         title: l.topic || l.subject,
         description: [l.studentTeacher?.name || l.teacherLabel, l.notes].filter(Boolean).join(' · ') || undefined,
@@ -147,9 +147,9 @@ const getIcs = async (req, res) => {
     ];
 
     res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
-    res.setHeader('Content-Disposition', 'inline; filename="diklario.ics"');
+    res.setHeader('Content-Disposition', 'inline; filename="peravenor.ics"');
     res.setHeader('Cache-Control', 'no-store'); // чужое расписание не должно осесть в общем кэше
-    res.send(buildCalendar({ name: `Diklario — ${user.name}`, events }));
+    res.send(buildCalendar({ name: `Peravenor — ${user.name}`, events }));
   } catch (err) {
     console.error('[calendar] ics:', err.message);
     res.status(500).send('Error');
