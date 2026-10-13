@@ -2,10 +2,34 @@
 // По умолчанию — Groq (бесплатно, быстро). Провайдер настраивается в .env:
 //   AI_API_KEY  — ключ (без него → code='NO_AI_KEY' → контроллер отдаёт 503)
 //   AI_BASE_URL — базовый URL (по умолчанию Groq)
-//   AI_MODEL    — модель (по умолчанию Llama 3.3 70B на Groq)
+//   AI_MODEL    — модель (по умолчанию openai/gpt-oss-120b на Groq; пробуется первой)
 // Сменить провайдера (Gemini/OpenRouter/Together/локальный Ollama) = поменять эти 3 строки в .env.
 const DEFAULT_BASE_URL = 'https://api.groq.com/openai/v1';
-const DEFAULT_MODEL = 'llama-3.3-70b-versatile';
+// ⚠️ 2026-10: Groq снял llama-3.3-70b-versatile — все ИИ-функции падали с «model does not exist».
+// Поэтому модели теперь цепочкой: если провайдер ответил «модели нет», берём следующую,
+// а не роняем запрос. AI_MODEL из .env (если задан) пробуется первым.
+const DEFAULT_MODELS = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b'];
+const AI_TIMEOUT_MS = 60000;
+
+// Модель, которая последней ответила успешно, — чтобы не стучаться в снятую на каждом запросе.
+let workingModel = null;
+
+const modelChain = () => {
+  const fromEnv = process.env.AI_MODEL ? [process.env.AI_MODEL] : [];
+  const chain = [...new Set([...fromEnv, ...DEFAULT_MODELS])];
+  return workingModel ? [workingModel, ...chain.filter((m) => m !== workingModel)] : chain;
+};
+
+const isModelGone = (status, json) => {
+  const code = json?.error?.code || '';
+  const msg = json?.error?.message || '';
+  return status === 404 || code === 'model_not_found' || code === 'model_decommissioned'
+    || /does not exist|decommissioned|not found/i.test(msg);
+};
+
+// gpt-oss — «думающие» модели: рассуждение расходует max_tokens. Держим его коротким
+// и добавляем запас, иначе JSON обрезается на середине.
+const isReasoningModel = (model) => /gpt-oss/i.test(model);
 
 const TYPE_HINT = {
   single:    'ровно 4 варианта, один правильный; поле answer — массив с одним индексом',
@@ -49,30 +73,53 @@ const chatJSON = async ({ user, maxTokens = 3000, temperature = 0.7 }) => {
     throw err;
   }
   const baseUrl = process.env.AI_BASE_URL || DEFAULT_BASE_URL;
-  const model = process.env.AI_MODEL || DEFAULT_MODEL;
 
-  const resp = await fetch(`${baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model,
-      max_tokens: maxTokens,
-      temperature,
-      messages: [
-        { role: 'system', content: 'Ты — помощник преподавателя. Отвечай только валидным JSON.' },
-        { role: 'user', content: user },
-      ],
-    }),
-  });
+  let lastError = null;
+  for (const model of modelChain()) {
+    const reasoning = isReasoningModel(model);
+    let resp;
+    try {
+      resp = await fetch(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens: reasoning ? maxTokens + 1500 : maxTokens,
+          temperature,
+          ...(reasoning ? { reasoning_effort: 'low' } : {}),
+          messages: [
+            { role: 'system', content: 'Ты — помощник преподавателя. Отвечай только валидным JSON.' },
+            { role: 'user', content: user },
+          ],
+        }),
+        signal: AbortSignal.timeout(AI_TIMEOUT_MS),
+      });
+    } catch (e) {
+      lastError = new Error(e.name === 'TimeoutError' ? 'ИИ не ответил вовремя, попробуйте ещё раз' : 'ИИ-сервис недоступен');
+      continue;
+    }
 
-  const json = await resp.json();
-  if (!resp.ok) throw new Error(json?.error?.message || 'Ошибка AI-провайдера');
+    const json = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      if (isModelGone(resp.status, json)) {
+        console.warn(`[ai] модель ${model} недоступна у провайдера, пробуем следующую`);
+        if (workingModel === model) workingModel = null;
+        lastError = new Error('ИИ временно недоступен');
+        continue;
+      }
+      if (resp.status === 429) throw new Error('ИИ перегружен, попробуйте через минуту');
+      console.error(`[ai] ${model}: ${resp.status} ${json?.error?.message}`);
+      throw new Error('Ошибка ИИ-сервиса, попробуйте ещё раз');
+    }
 
-  const text = json.choices?.[0]?.message?.content ?? '';
-  return extractJson(text);
+    workingModel = model;
+    const text = json.choices?.[0]?.message?.content ?? '';
+    return extractJson(text);
+  }
+  throw lastError || new Error('ИИ временно недоступен');
 };
 
 const generateQuiz = async (params) => {
