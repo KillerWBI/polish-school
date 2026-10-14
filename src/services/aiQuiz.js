@@ -31,10 +31,12 @@ const isModelGone = (status, json) => {
 // и добавляем запас, иначе JSON обрезается на середине.
 const isReasoningModel = (model) => /gpt-oss/i.test(model);
 
+// answer — ТЕКСТ правильного варианта, а не индекс: с индексом модель путала счёт с 0 и с 1
+// («20%» — второй вариант → писала 2 → у нас это третий, 25%). Индекс находит сервер (normalizeQuestions).
 const TYPE_HINT = {
-  single:    'ровно 4 варианта, один правильный; поле answer — массив с одним индексом',
-  multiple:  '4–5 вариантов, несколько правильных; answer — индексы всех правильных',
-  truefalse: 'варианты строго ["Верно","Неверно"]; answer — [0] или [1]',
+  single:    'ровно 4 разных варианта, один правильный; answer — массив с ТЕКСТОМ правильного варианта, дословно как в options',
+  multiple:  '4–5 разных вариантов, несколько правильных; answer — ТЕКСТЫ всех правильных вариантов, дословно как в options',
+  truefalse: 'варианты строго ["Верно","Неверно"]; answer — ["Верно"] или ["Неверно"]',
   open:      'без вариантов (options: []), answer: []; добавь поле sampleAnswer с образцом ответа',
 };
 
@@ -51,10 +53,42 @@ const buildPrompt = ({ topic, count, difficulty, type, language, avoid }) => {
 Тип вопросов: ${TYPE_HINT[type]}.
 ${avoidBlock}
 Верни СТРОГО валидный JSON без markdown, без текста вокруг, по схеме:
-{"questions":[{"question":"...","options":["..."],"answer":[0],"sampleAnswer":"","explanation":"..."}]}
-- explanation — краткое пояснение правильного ответа (1–2 предложения).
+{"questions":[{"question":"...","options":["..."],"explanation":"...","answer":["текст правильного варианта"],"sampleAnswer":""}]}
+- explanation — краткое пояснение правильного ответа (1–2 предложения); answer обязан с ним совпадать.
 - Ничего, кроме JSON, не выводи.`;
 };
+
+const norm = (s) => String(s ?? '').trim().toLowerCase();
+
+// Приводим вопросы от ИИ к хранимому формату { answer: [индексы с 0] }. Ответ ИИ — тексты вариантов;
+// вопрос отбрасывается, если ответ не находится среди вариантов однозначно (лучше на вопрос
+// меньше, чем неверный ключ: от него зависят баллы, обладание темой и оценки у учителя).
+const normalizeQuestions = (questions, type) => (Array.isArray(questions) ? questions : [])
+  .map((q) => {
+    const question = String(q?.question ?? '').trim();
+    if (!question) return null;
+    const base = {
+      question,
+      sampleAnswer: String(q.sampleAnswer ?? ''),
+      explanation: String(q.explanation ?? ''),
+    };
+    if (type === 'open') return { ...base, options: [], answer: [] };
+
+    const options = (Array.isArray(q.options) ? q.options : []).map((o) => String(o).trim());
+    const keys = options.map(norm);
+    if (options.length < 2 || keys.some((k) => !k) || new Set(keys).size !== keys.length) return null;
+    if (type === 'truefalse' && options.length !== 2) return null;
+
+    // Число в answer не принимаем: неизвестно, считала модель с 0 или с 1.
+    const given = Array.isArray(q.answer) ? q.answer : [];
+    if (!given.length || given.some((a) => typeof a !== 'string')) return null;
+    const answer = [...new Set(given.map((a) => keys.indexOf(norm(a))))];
+    if (answer.includes(-1)) return null;
+    if (type !== 'multiple' && answer.length !== 1) return null;
+
+    return { ...base, options, answer: answer.sort((a, b) => a - b) };
+  })
+  .filter(Boolean);
 
 // Достаём JSON даже если модель обернула его в ```json ... ``` или добавила текст.
 const extractJson = (text) => {
@@ -124,29 +158,32 @@ const chatJSON = async ({ user, maxTokens = 3000, temperature = 0.7 }) => {
 
 const generateQuiz = async (params) => {
   const parsed = await chatJSON({ user: buildPrompt(params) });
-  if (!Array.isArray(parsed.questions) || !parsed.questions.length) {
+  const questions = normalizeQuestions(parsed.questions, params.type);
+  if (!questions.length) {
     throw new Error('AI вернул некорректную структуру теста');
   }
-  return parsed.questions;
+  return questions;
 };
 
-// Разбить тему на 4–8 подтем (роадмап от базового к продвинутому) + учебную цель.
-// Возвращает { goal, steps: ['...', ...] }.
+// Разбить тему на модули и подтемы (от базового к продвинутому) + учебную цель.
+// Ширину выбирает ИИ: узкая тема — один модуль, широкая — несколько.
+// Возвращает { goal, modules: [{ title, steps: ['...'] }] } — в плоский roadmap собирает utils/roadmap.
 const generateRoadmap = async ({ title, subject, language = 'русский' }) => {
-  const prompt = `Составь учебный роадмап для самостоятельного изучения темы.
+  const prompt = `Составь учебный план для самостоятельного изучения темы.
 Тема: "${title}".${subject ? `\nПредмет: ${subject}.` : ''}
 Язык ответа: ${language}.
-Разбей тему на 4–8 подтем (шагов) от базовых к продвинутым — логичная последовательность изучения.
+Оцени ширину темы. Узкая тема — 1 модуль из 4–6 подтем. Широкая — 2–6 модулей по 3–6 подтем.
+Модули и подтемы — от базовых к продвинутым, логичная последовательность изучения; всего не больше 30 подтем.
+Каждая подтема — конкретная и проверяемая тестом (не «Введение», не «Повторение»).
+Если модуль один, назови его так же, как тему.
 Также сформулируй краткую учебную цель темы (1 предложение).
 Верни СТРОГО валидный JSON без markdown, без текста вокруг, по схеме:
-{"goal":"...","steps":["подтема 1","подтема 2","..."]}
+{"goal":"...","modules":[{"title":"модуль","steps":["подтема 1","подтема 2"]}]}
 Ничего, кроме JSON, не выводи.`;
-  const parsed = await chatJSON({ user: prompt, maxTokens: 1000, temperature: 0.5 });
-  const steps = Array.isArray(parsed.steps)
-    ? parsed.steps.map((s) => String(s).trim()).filter(Boolean)
-    : [];
-  if (!steps.length) throw new Error('AI вернул пустой роадмап');
-  return { goal: typeof parsed.goal === 'string' ? parsed.goal.trim() : null, steps };
+  const parsed = await chatJSON({ user: prompt, maxTokens: 2500, temperature: 0.5 });
+  const modules = Array.isArray(parsed.modules) ? parsed.modules : [];
+  if (!modules.length) throw new Error('AI вернул пустой роадмап');
+  return { goal: typeof parsed.goal === 'string' ? parsed.goal.trim() : null, modules };
 };
 
 // Сгенерировать флеш-карточки (front/back) по подтеме шага трека для интервального повторения.
@@ -217,6 +254,14 @@ ${clipped}
   return cards;
 };
 
+// Какие ссылки просить. Проверку проходит только существующее, а угадать адрес небольшого сайта
+// ИИ почти не может (замер 2026-10-14: «ещё» по подтеме давал 7 выдуманных из 7). Статья Википедии
+// проходит почти всегда — неточное название verifySources доводит до настоящей статьи поиском.
+// Поэтому — статьи о КОНКРЕТНЫХ понятиях подтемы: их много, и «ещё» не упирается в одну статью.
+const LINKS_HINT = `Ссылки — прежде всего статьи Википедии на языке названий о КОНКРЕТНЫХ понятиях подтемы
+(каждая ссылка — отдельное понятие, термин, закон, личность или событие), затем официальная документация и
+крупнейшие учебные ресурсы. Адреса небольших сайтов не угадывай.`;
+
 // Предложить источники (книги + ссылки) для изучения подтемы. Существование проверяется отдельно.
 // avoid — уже показанные (названия/URL), чтобы «подобрать ещё» давало НОВЫЕ.
 const suggestSources = async ({ title, subject, language = 'русский', avoid = [] }) => {
@@ -225,8 +270,9 @@ const suggestSources = async ({ title, subject, language = 'русский', avo
     : '';
   const prompt = `Предложи учебные источники по подтеме "${title}"${subject ? ` (предмет: ${subject})` : ''}.
 Язык названий: ${language}.
-До 4 известных книг (с автором) и до 3 надёжных ссылок (реальные URL на известные ресурсы — Wikipedia, MDN, офиц. документация, крупные учебные сайты).
-Предлагай только то, что вероятно существует. Не выдумывай URL — лучше меньше, но реальные.
+До 3 известных книг (с автором) и до 5 надёжных ссылок.
+${LINKS_HINT}
+Предлагай только то, что вероятно существует. Не выдумывай книги и URL — лучше меньше, но реальные.
 ${avoidBlock}Верни СТРОГО валидный JSON без markdown по схеме:
 {"books":[{"title":"...","author":"..."}],"links":[{"title":"...","url":"https://..."}]}
 Ничего, кроме JSON.`;
@@ -236,6 +282,35 @@ ${avoidBlock}Верни СТРОГО валидный JSON без markdown по 
     books: Array.isArray(parsed.books) ? parsed.books : [],
     links: Array.isArray(parsed.links) ? parsed.links : [],
   };
+};
+
+// Источники сразу на несколько подтем — один вызов ИИ вместо одного на подтему.
+// Модуль целиком (кнопка модуля) или весь трек (стартовые источники при создании).
+// steps — подтемы [{ id, title, moduleTitle? }]. ИИ размечает ответ НОМЕРОМ подтемы (с 1, как в
+// списке промпта); номер вне списка отбрасываем. Возвращает [{ step, books, links }] — формат,
+// который принимает verifySources. perStep — сколько книг и ссылок просить на подтему.
+const suggestSourcesForSteps = async ({ topic, moduleTitle, steps, subject, language = 'русский', perStep = 2 }) => {
+  // Весь трек: подтемы из разных модулей — модуль в строке, иначе «Основные понятия» неоднозначны
+  const list = steps.map((s, i) => `${i + 1}. ${!moduleTitle && s.moduleTitle ? `${s.moduleTitle} — ` : ''}${s.title}`).join('\n');
+  const scope = moduleTitle ? `модуля "${moduleTitle}" темы "${topic}"` : `темы "${topic}"`;
+  const prompt = `Подбери учебные источники для ${scope}${subject ? ` (предмет: ${subject})` : ''}.
+Подтемы:
+${list}
+Для КАЖДОЙ подтемы: до ${perStep} известных книг (с автором) и до ${perStep} надёжных ссылок.
+${LINKS_HINT}
+Язык названий: ${language}. Предлагай только то, что вероятно существует. Не выдумывай книги и URL — лучше меньше, но реальные.
+Верни СТРОГО валидный JSON без markdown, где step — номер подтемы из списка:
+{"items":[{"step":1,"books":[{"title":"...","author":"..."}],"links":[{"title":"...","url":"https://..."}]}]}
+Ничего, кроме JSON.`;
+  // ~50 токенов на источник: 30 подтем × 2 источника не должны обрезать JSON на середине
+  const parsed = await chatJSON({ user: prompt, maxTokens: Math.max(3000, steps.length * perStep * 2 * 60), temperature: 0.4 });
+  return (Array.isArray(parsed.items) ? parsed.items : [])
+    .map((it) => ({
+      step: steps[Number(it?.step) - 1],
+      books: Array.isArray(it?.books) ? it.books : [],
+      links: Array.isArray(it?.links) ? it.links : [],
+    }))
+    .filter((it) => it.step);
 };
 
 // Подсказка по уровню для промпта: под какой уровень подбирать лексику.
@@ -297,4 +372,4 @@ ${avoidBlock}Верни СТРОГО валидный JSON без markdown, бе
   return words;
 };
 
-module.exports = { generateQuiz, generateRoadmap, generateFlashcards, generateFlashcardsFromText, gradeOpenAnswers, suggestSources, generateVocab };
+module.exports = { generateQuiz, normalizeQuestions, generateRoadmap, generateFlashcards, generateFlashcardsFromText, gradeOpenAnswers, suggestSources, suggestSourcesForSteps, generateVocab };

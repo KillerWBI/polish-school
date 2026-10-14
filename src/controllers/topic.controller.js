@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const { Topic, Quiz, TrackSource, User } = require('../models');
-const { generateQuiz, generateRoadmap, gradeOpenAnswers, suggestSources } = require('../services/aiQuiz');
+const { generateQuiz, generateRoadmap, gradeOpenAnswers, suggestSources, suggestSourcesForSteps } = require('../services/aiQuiz');
+const { buildRoadmap, stepTitleForAi } = require('../utils/roadmap');
 const { verifySources } = require('../utils/verifySources');
 const { overLimit } = require('../config/planLimits');
 const { enforceAi } = require('../utils/aiLimit');
@@ -94,24 +95,18 @@ const create = async (req, res) => {
     if (await enforceAi(res, req.user.id, 'student')) return;
 
     let goal = null;
-    let steps = [];
+    let roadmap = [];
     try {
       const rm = await generateRoadmap({ title, subject, language: 'русский' });
       goal = rm.goal;
-      steps = rm.steps;
+      roadmap = buildRoadmap(rm.modules);
     } catch (e) {
-      // AI недоступен/сбой — тема всё равно рабочая: один шаг = сама тема
       console.warn('generateRoadmap fallback:', e.message);
-      steps = [title];
     }
-
-    const roadmap = steps.map((t, i) => ({
-      id: crypto.randomUUID(),
-      title: t,
-      order: i,
-      mastery: 0,
-      attempts: 0,
-    }));
+    // AI недоступен/сбой/мусор — тема всё равно рабочая: один шаг = сама тема
+    if (!roadmap.length) {
+      roadmap = [{ id: crypto.randomUUID(), title, order: 0, mastery: 0, attempts: 0 }];
+    }
 
     const topic = await Topic.create({
       userId: req.user.id,
@@ -120,10 +115,37 @@ const create = async (req, res) => {
       goal,
       roadmap,
     });
+    await seedSources(topic, req.user.id);
     res.status(201).json({ data: topic });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Ошибка создания темы' });
+  }
+};
+
+// Стартовые источники: каждой подтеме — по одному ПРОВЕРЕННОМУ сразу при создании трека.
+// Один вызов ИИ на весь трек (лимит ИИ не списывается отдельно — это часть создания трека).
+// Не прошла проверку ни одна кандидатура — подтема остаётся без источника: выдуманная ссылка
+// хуже пустого места, а кнопка «Подобрать» под подтемой доберёт. Сбой не мешает создать трек.
+const seedSources = async (topic, userId) => {
+  try {
+    const steps = topic.roadmap;
+    // Кандидатов с запасом (2 книги + 2 ссылки): с одним источник получала ~половина подтем,
+    // с двумя — 14–15 из 15 (замер 2026-10-14), сохраняем первый прошедший проверку
+    const suggested = await suggestSourcesForSteps({
+      topic: topic.title, steps, subject: topic.subject, language: 'русский', perStep: 2,
+    });
+    const checked = await Promise.all(suggested.map((it) => verifySources(it)));
+    const done = new Set();
+    const rows = [];
+    suggested.forEach((it, i) => {
+      if (done.has(it.step.id)) return; // ИИ повторил подтему — одной хватит
+      const [first] = newSourceRows(checked[i], [], { userId, topicId: topic.id, stepId: it.step.id }, 1);
+      if (first) { rows.push(first); done.add(it.step.id); }
+    });
+    if (rows.length) await TrackSource.bulkCreate(rows);
+  } catch (e) {
+    console.warn('seedSources:', e.message);
   }
 };
 
@@ -185,7 +207,7 @@ const next = async (req, res) => {
     }
 
     // Практикуем конкретную подтему в контексте темы
-    const quizTopic = step.title === topic.title ? topic.title : `${topic.title} — ${step.title}`;
+    const quizTopic = stepTitleForAi(topic.title, step);
     const questions = await generateQuiz({
       topic: quizTopic,
       count: type === 'open' ? 3 : 5,
@@ -252,7 +274,7 @@ const gradeOpen = async (req, res) => {
 
     if (await enforceAi(res, req.user.id, 'student')) return; // дневной лимит ИИ
 
-    const quizTopic = step.title === topic.title ? topic.title : `${topic.title} — ${step.title}`;
+    const quizTopic = stepTitleForAi(topic.title, step);
     const items = qs.map((q, i) => ({
       question: q.question,
       sampleAnswer: q.sampleAnswer || '',
@@ -320,27 +342,14 @@ const sources = async (req, res) => {
     // Уже сохранённые по шагу — чтобы не предлагать повторно (анти-повтор) и не дублировать
     const existing = await TrackSource.findAll({ where: { userId: req.user.id, topicId: topic.id, stepId } });
     const avoid = existing.flatMap((s) => [s.title, s.url].filter(Boolean));
-    const existingKeys = new Set(existing.map((s) => (s.url || s.title).toLowerCase()));
 
     if (await enforceAi(res, req.user.id, 'student')) return; // дневной лимит ИИ
 
-    const title = step.title === topic.title ? topic.title : `${topic.title} — ${step.title}`;
+    const title = stepTitleForAi(topic.title, step);
     const suggested = await suggestSources({ title, subject: topic.subject, language: 'русский', avoid });
     const checked = await verifySources(suggested, { loose: !!loose });
 
-    // Отсекаем дубли по url/title и сохраняем новые
-    const toSave = [];
-    const seen = new Set(existingKeys);
-    for (const s of checked) {
-      const key = (s.url || s.title || '').toLowerCase();
-      if (!key || seen.has(key)) continue;
-      seen.add(key);
-      toSave.push({
-        userId: req.user.id, topicId: topic.id, stepId,
-        type: s.type, title: s.title, author: s.author || null, url: s.url || null,
-        verified: s.verified !== false,
-      });
-    }
+    const toSave = newSourceRows(checked, existing, { userId: req.user.id, topicId: topic.id, stepId });
     const created = toSave.length ? await TrackSource.bulkCreate(toSave) : [];
     res.json({ data: created });
   } catch (err) {
@@ -348,6 +357,69 @@ const sources = async (req, res) => {
       return res.status(503).json({ error: 'AI не настроен: добавьте AI_API_KEY в .env бэкенда' });
     }
     console.error('topic.sources:', err.message);
+    res.status(502).json({ error: err.message || 'Не удалось подобрать источники' });
+  }
+};
+
+// Сколько новых источников добавляет одно нажатие «Подобрать» (на подтему)
+const SOURCES_PER_CLICK = 2;
+
+// Отсекаем дубли по url/title (против уже сохранённых у шага и внутри новой порции) → строки TrackSource.
+// max — не больше стольких новых: ИИ предлагает с запасом, часть отсеет проверка.
+const newSourceRows = (checked, existing, base, max = SOURCES_PER_CLICK) => {
+  const seen = new Set(existing.map((s) => (s.url || s.title).toLowerCase()));
+  const rows = [];
+  for (const s of checked) {
+    if (rows.length === max) break;
+    const key = (s.url || s.title || '').toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    rows.push({
+      ...base,
+      type: s.type, title: s.title, author: s.author || null, url: s.url || null,
+      verified: s.verified !== false,
+    });
+  }
+  return rows;
+};
+
+// POST /topics/:id/sources/module — подобрать источники сразу ко всем подтемам модуля.
+// Один вызов ИИ на модуль (а не на каждую подтему), проверка — по каждой подтеме параллельно,
+// сохраняем под stepId своей подтемы. Body { moduleId }.
+const moduleSources = async (req, res) => {
+  try {
+    const topic = await Topic.findOne({ where: { id: req.params.id, userId: req.user.id } });
+    if (!topic) return res.status(404).json({ error: 'Тема не найдена' });
+
+    const steps = (Array.isArray(topic.roadmap) ? topic.roadmap : []).filter((s) => s.moduleId === req.body.moduleId);
+    if (!steps.length) return res.status(400).json({ error: 'Модуль не найден' });
+
+    if (await enforceAi(res, req.user.id, 'student')) return; // дневной лимит ИИ
+
+    const [suggested, existing] = await Promise.all([
+      suggestSourcesForSteps({
+        topic: topic.title, moduleTitle: steps[0].moduleTitle, steps, subject: topic.subject, language: 'русский',
+      }),
+      TrackSource.findAll({ where: { userId: req.user.id, topicId: topic.id, stepId: steps.map((s) => s.id) } }),
+    ]);
+    const checked = await Promise.all(suggested.map((it) => verifySources(it)));
+
+    // Отобранное сразу добавляем к «уже сохранённым» — если ИИ повторил подтему, дубли не пройдут
+    const known = [...existing];
+    const toSave = [];
+    suggested.forEach((it, i) => {
+      const rows = newSourceRows(checked[i], known.filter((s) => s.stepId === it.step.id),
+        { userId: req.user.id, topicId: topic.id, stepId: it.step.id });
+      known.push(...rows);
+      toSave.push(...rows);
+    });
+    const created = toSave.length ? await TrackSource.bulkCreate(toSave) : [];
+    res.json({ data: created });
+  } catch (err) {
+    if (err.code === 'NO_AI_KEY') {
+      return res.status(503).json({ error: 'AI не настроен: добавьте AI_API_KEY в .env бэкенда' });
+    }
+    console.error('topic.moduleSources:', err.message);
     res.status(502).json({ error: err.message || 'Не удалось подобрать источники' });
   }
 };
@@ -366,4 +438,4 @@ const removeSource = async (req, res) => {
   }
 };
 
-module.exports = { list, getOne, create, remove, share, next, attempt, gradeOpen, sources, sourcesList, removeSource };
+module.exports = { list, getOne, create, remove, share, next, attempt, gradeOpen, sources, moduleSources, sourcesList, removeSource };

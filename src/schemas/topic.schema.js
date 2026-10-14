@@ -41,6 +41,11 @@ const sourcesReq = z.object({
   loose:  z.boolean().optional(),
 });
 
+// POST /topics/:id/sources/module — подобрать источники ко всем подтемам модуля
+const moduleSourcesReq = z.object({
+  moduleId: z.string().min(1, 'Не указан модуль'),
+});
+
 // POST /topics/:id/cards/from-text — карточки из текста
 const cardsFromText = z.object({
   stepId: z.string().min(1, 'Не указан шаг'),
@@ -53,4 +58,4 @@ const shareTopic = z.object({
   shared: z.boolean(),
 });
 
-module.exports = { createTopic, submitAttempt, generateCards, reviewCard, gradeOpen, sourcesReq, cardsFromText, shareTopic };
+module.exports = { createTopic, submitAttempt, generateCards, reviewCard, gradeOpen, sourcesReq, moduleSourcesReq, cardsFromText, shareTopic };

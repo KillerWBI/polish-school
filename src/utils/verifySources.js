@@ -12,13 +12,34 @@ const fetchTimeout = async (url, opts = {}, ms = 6000) => {
   }
 };
 
+// Запасная проверка книги — Open Library (без ключа и без общей дневной квоты).
+const verifyBookOpenLibrary = async ({ title, author }) => {
+  const params = new URLSearchParams({ title, limit: '1', fields: 'title,author_name,key' });
+  if (author) params.set('author', author);
+  const resp = await fetchTimeout(`https://openlibrary.org/search.json?${params}`, {
+    headers: { 'user-agent': 'PeravenorBot/1.0 (support@peravenor.com)' },
+  });
+  if (!resp.ok) return null;
+  const doc = (await resp.json()).docs?.[0];
+  if (!doc) return null;
+  return {
+    type: 'book', verified: true,
+    title: doc.title || title,
+    author: (doc.author_name || []).join(', ') || author || '',
+    url: doc.key ? `https://openlibrary.org${doc.key}` : null,
+  };
+};
+
 // Проверить книгу через Google Books. Возвращает нормализованную книгу или null.
+// Без ключа Google Books делит ОДНУ дневную квоту на всех анонимных клиентов и отвечает 429
+// (2026-10-14: «Quota exceeded … Queries per day») — тогда не проходила ни одна книга.
+// Поэтому при любом не-OK ответе проверяем по Open Library.
 const verifyBook = async ({ title, author }) => {
   try {
     const q = [`intitle:${title}`, author ? `inauthor:${author}` : ''].filter(Boolean).join('+');
     const url = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(q)}&maxResults=1&country=US`;
     const resp = await fetchTimeout(url);
-    if (!resp.ok) return null;
+    if (!resp.ok) return await verifyBookOpenLibrary({ title, author });
     const json = await resp.json();
     const item = json.items?.[0]?.volumeInfo;
     if (!item) return null;
@@ -48,6 +69,33 @@ const isInternalHost = (hostname) => {
     || (a === 169 && b === 254);
 };
 
+// Основы значимых слов (≥4 букв, первые 5) — сравнение без учёта падежей: «империя» ≈ «империи».
+const stems = (s) => new Set(s.toLowerCase().match(/[\p{L}\d]{4,}/gu)?.map((w) => w.slice(0, 5)) || []);
+
+// ИИ часто угадывает название статьи Википедии неточно («Государственная_дума_(Российская_империя)»
+// вместо «Государственная дума Российской империи») — такая ссылка даёт 404. Ищем статью
+// полнотекстовым поиском самой Википедии и возвращаем РЕАЛЬНЫЙ адрес найденной статьи.
+// Поиск находит что-нибудь всегда, поэтому найденное название должно покрывать не меньше половины
+// значимых слов задуманного — иначе null (выдуманная статья не превращается в случайную настоящую).
+const resolveWikipedia = async (url) => {
+  const { hostname, pathname } = new URL(url);
+  if (!/^[a-z-]+\.(m\.)?wikipedia\.org$/i.test(hostname) || !pathname.startsWith('/wiki/')) return null;
+  const host = hostname.replace('.m.', '.');
+  const guess = decodeURIComponent(pathname.slice(6)).replace(/_/g, ' ');
+  const api = `https://${host}/w/api.php?${new URLSearchParams({
+    action: 'query', list: 'search', srsearch: guess, srlimit: '1', srnamespace: '0', format: 'json',
+  })}`;
+  const resp = await fetchTimeout(api, { headers: { 'user-agent': 'PeravenorBot/1.0 (support@peravenor.com)' } });
+  if (!resp.ok) return null;
+  const title = (await resp.json()).query?.search?.[0]?.title;
+  if (!title) return null;
+  const want = stems(guess);
+  const got = stems(title);
+  const hit = [...want].filter((w) => got.has(w)).length;
+  if (!want.size || hit * 2 < want.size) return null;
+  return { title, url: `https://${host}/wiki/${encodeURIComponent(title.replace(/ /g, '_'))}` };
+};
+
 // Проверить ссылку GET-запросом (точнее HEAD по части «мягких» 404). Возвращает источник или null.
 const verifyLink = async ({ title, url }) => {
   try {
@@ -58,6 +106,10 @@ const verifyLink = async ({ title, url }) => {
       method: 'GET',
       headers: { 'user-agent': 'Mozilla/5.0 (compatible; PeravenorBot/1.0)' },
     });
+    if (resp.status === 404) {
+      const found = await resolveWikipedia(url);
+      return found ? { type: 'link', verified: true, title: found.title, url: found.url } : null;
+    }
     if (resp.status >= 400) return null;
     // финальный URL после редиректов — чтобы не сохранить ссылку, ведущую на страницу-заглушку
     const finalUrl = resp.url || url;

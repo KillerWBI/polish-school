@@ -621,6 +621,8 @@ GET /users/@ivan_petrov/profile
 { "topic": "Дроби", "count": 5, "difficulty": "medium", "type": "single", "language": "русский" }
 // type ∈ single|multiple|truefalse|open. Response 200:
 { "data": { "topic","type",..., "questions": [ { "question","options":[],"answer":[0],"sampleAnswer","explanation" } ] } }
+// answer — индексы правильных вариантов с 0. ИИ присылает ТЕКСТ варианта, индекс находит сервер
+// (normalizeQuestions в services/aiQuiz.js); вопрос с неоднозначным ответом в ответ не попадает.
 
 // POST /quizzes — Body: { topic, type, difficulty?, language?, questions:[...] } → 201 { data: <Quiz> }
 ```
@@ -839,13 +841,14 @@ GET /users/@ivan_petrov/profile
 |--------|------|------|------|----------|
 | GET | `/topics` | ✅ | student | Мои треки (с `masteryPercent`, `roadmap`, `attempts`) |
 | GET | `/topics/:id` | ✅ | student | Трек + роадмап + история попыток |
-| POST | `/topics` | ✅ | student | Создать трек (AI генерит `goal` + `roadmap` из 4–8 шагов; фолбэк = 1 шаг) |
+| POST | `/topics` | ✅ | student | Создать трек (AI генерит `goal` + модули с подтемами по ширине темы: 1 модуль × 4–6 для узкой, 2–6 × 3–6 для широкой, потолок 30 подтем → плоский `roadmap`; фолбэк = 1 шаг). **Сразу подбирает каждой подтеме по 1 проверенному источнику** — один вызов ИИ на весь трек, отдельно лимит ИИ не списывается; создание ~13 с |
 | DELETE | `/topics/:id` | ✅ | student | Удалить трек (попытки каскадом) |
 | POST | `/topics/:id/next` | ✅ | student | Сгенерировать практику по шагу (Body `{stepId, type?}` — `single` тест / `open` открытый ответ); сложность по mastery, анти-повтор |
 | POST | `/topics/:id/attempt` | ✅ | student | Записать результат теста (Body `{stepId,questions,answers,score,total,difficulty}`) → EMA |
 | POST | `/topics/:id/grade-open` | ✅ | student | ИИ-оценка открытых ответов (Body `{stepId,questions,answers,difficulty}`) → `{results:[{score,feedback}],avg,score,total,topic}`; сохраняет попытку `type=open`, EMA |
 | GET | `/topics/:id/sources` | ✅ | student | Сохранённые источники трека (`?stepId=`) — видны на странице темы под шагом |
-| POST | `/topics/:id/sources` | ✅ | student | Подобрать источники к шагу (Body `{stepId, loose?}`) — ИИ (с анти-повтором avoid) → проверка существования (Google Books/GET-ссылки) → **сохраняет и возвращает новые**. `loose=true` — добавляет «менее проверенные» (`verified:false`) |
+| POST | `/topics/:id/sources` | ✅ | student | Подобрать источники к шагу (Body `{stepId, loose?}`) — ИИ (с анти-повтором avoid) → проверка существования (Google Books/GET-ссылки) → **сохраняет и возвращает новые, не больше 2 за запрос**. `loose=true` — добавляет «менее проверенные» (`verified:false`) |
+| POST | `/topics/:id/sources/module` | ✅ | student | Подобрать источники **ко всем подтемам модуля** (Body `{moduleId}`) — один вызов ИИ (ответ размечен номером подтемы) → проверка по каждой подтеме параллельно → сохраняет под `stepId` своей подтемы (не больше 2 на подтему), возвращает новые |
 | DELETE | `/topics/:id/sources/:sourceId` | ✅ | student | Удалить источник |
 | POST | `/topics/:id/cards/from-text` | ✅ | student | Импорт карточек из текста (Body `{stepId,text,count?}`) — ИИ делает front/back строго по тексту |
 
@@ -853,9 +856,11 @@ GET /users/@ivan_petrov/profile
 // GET /topics/:id → Response 200
 { "data": {
   "topic": { "id","title","subject","goal","masteryPercent","attempts",
-             "roadmap": [{ "id","title","order","mastery","attempts" }] },
+             "roadmap": [{ "id","title","order","mastery","attempts","moduleId","moduleTitle" }] },
   "attempts": [{ "id","stepId","difficulty","score","total","createdAt" }]
 } }
+// roadmap — плоский список подтем; модуль = подпись moduleId/moduleTitle (utils/roadmap.js).
+// У треков, созданных до 2026-10-14, moduleId нет — это один неявный модуль.
 
 // POST /topics/:id/next → Response 200
 { "data": { "topic": "Дроби — Сложение", "stepId", "type": "single", "difficulty": "easy",

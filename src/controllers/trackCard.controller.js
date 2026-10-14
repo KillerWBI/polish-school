@@ -3,6 +3,7 @@ const { Topic, TrackCard } = require('../models');
 const { generateFlashcards, generateFlashcardsFromText } = require('../services/aiQuiz');
 const { computeSr } = require('../utils/sr');
 const { enforceAi } = require('../utils/aiLimit');
+const { stepTitleForAi } = require('../utils/roadmap');
 
 // Проверка, что трек принадлежит текущему ученику
 const findOwnTopic = (topicId, userId) =>
@@ -24,7 +25,7 @@ const generate = async (req, res) => {
     if (await enforceAi(res, req.user.id, 'student')) return; // дневной лимит ИИ
 
     const n = Math.min(15, Math.max(4, parseInt(count) || 8));
-    const cardTopic = step.title === topic.title ? topic.title : `${topic.title} — ${step.title}`;
+    const cardTopic = stepTitleForAi(topic.title, step);
     const cards = await generateFlashcards({
       title: cardTopic,
       subject: topic.subject,

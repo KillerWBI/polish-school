@@ -1,5 +1,5 @@
 const router = require('express').Router();
-const { createTopic, submitAttempt, generateCards, reviewCard, gradeOpen, sourcesReq, cardsFromText, shareTopic } = require('../schemas/topic.schema');
+const { createTopic, submitAttempt, generateCards, reviewCard, gradeOpen, sourcesReq, moduleSourcesReq, cardsFromText, shareTopic } = require('../schemas/topic.schema');
 const { validate } = require('../middleware/validate');
 const auth = require('../middleware/auth');
 const { isStudent } = require('../middleware/role');
@@ -18,6 +18,7 @@ router.post('/:id/attempt', auth, isStudent, validate(submitAttempt), ctrl.attem
 router.post('/:id/grade-open', auth, isStudent, aiRateLimit, validate(gradeOpen), ctrl.gradeOpen);
 router.get('/:id/sources',            auth, isStudent, ctrl.sourcesList);
 router.post('/:id/sources',           auth, isStudent, aiRateLimit, validate(sourcesReq), ctrl.sources);
+router.post('/:id/sources/module',    auth, isStudent, aiRateLimit, validate(moduleSourcesReq), ctrl.moduleSources); // все подтемы модуля, 1 вызов ИИ
 router.delete('/:id/sources/:sourceId', auth, isStudent, ctrl.removeSource);
 
 // Флеш-карточки шага + интервальное повторение (SR)
