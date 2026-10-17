@@ -19,13 +19,23 @@ const sequelize = require('./src/config/database');
 const PORT = process.env.PORT || 5000;
 
 // Если задан ADMIN_EMAIL — ищет пользователя с таким email и выставляет ему role='admin'.
-// Запускается один раз при старте; безопасно повторно (UPDATE WHERE role != 'admin' не меняет ничего).
+// Админ ровно один — тот, чей email в ADMIN_EMAIL: у остальных админов роль снимается
+// (сменили почту в env → прежний админ становится учителем). Запускается при старте; безопасно повторно.
 async function bootstrapAdmin() {
   const adminEmail = process.env.ADMIN_EMAIL;
   if (!adminEmail) return;
   try {
+    const { Op } = require('sequelize');
     const { User } = require('./src/models');
-    const user = await User.findOne({ where: { email: adminEmail.toLowerCase().trim() } });
+    const email = adminEmail.toLowerCase().trim();
+
+    const [demoted] = await User.update(
+      { role: 'teacher' },
+      { where: { role: 'admin', email: { [Op.ne]: email } } },
+    );
+    if (demoted) console.log(`✅ Снята роль admin у прежних админов: ${demoted}`);
+
+    const user = await User.findOne({ where: { email } });
     if (!user) {
       console.warn(`⚠️  ADMIN_EMAIL задан (${adminEmail}), но пользователь не найден`);
       return;

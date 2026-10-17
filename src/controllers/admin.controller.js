@@ -140,7 +140,6 @@ const setUserPlan = async (req, res) => {
     }
     const user = await User.findByPk(req.params.id, { attributes: ['id', 'role', 'plan'] });
     if (!user) return res.status(404).json({ error: 'Пользователь не найден' });
-    if (user.role !== 'teacher') return res.status(400).json({ error: 'Тарифы только для учителей' });
 
     await user.update({ plan });
     res.json({ data: { id: user.id, plan } });

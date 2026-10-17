@@ -27,6 +27,11 @@ const auth = async (req, res, next) => {
       return res.status(401).json({ error: 'Аккаунт деактивирован' });
     }
     req.user = { id: user.id, role: user.role };
+    // Админ работает в кабинете учителя или ученика (для тестирования). Режим выбирается
+    // на фронте и приходит заголовком X-Act-As; в БД роль остаётся 'admin'.
+    if (user.role === 'admin') {
+      req.user = { id: user.id, role: req.headers['x-act-as'] === 'student' ? 'student' : 'teacher', isAdmin: true };
+    }
     next();
   } catch (e) {
     return res.status(500).json({ error: 'Ошибка проверки аккаунта' });

@@ -1,6 +1,6 @@
 const { Op } = require('sequelize');
 const { VocabItem, User } = require('../models');
-const { overLimit, limitFor } = require('../config/planLimits');
+const { overLimit, limitFor, planOf } = require('../config/planLimits');
 const { enforceAi } = require('../utils/aiLimit');
 const { generateVocab } = require('../services/aiQuiz');
 
@@ -74,7 +74,7 @@ const create = async (req, res) => {
   try {
     const me = await User.findByPk(req.user.id, { attributes: ['plan'] });
     const used = await VocabItem.count({ where: { userId: req.user.id } });
-    if (overLimit(res, 'student', me?.plan, 'vocab', used)) return;
+    if (overLimit(res, 'student', planOf(req, me), 'vocab', used)) return;
 
     const { word, translation, example, language, nativeLanguage } = req.body;
     const item = await VocabItem.create({
@@ -122,7 +122,7 @@ const bulkCreate = async (req, res) => {
     const me = await User.findByPk(req.user.id, { attributes: ['plan'] });
     const { items, language, nativeLanguage } = req.body;
 
-    const r = await insertWords(req.user.id, me?.plan, items, language, nativeLanguage);
+    const r = await insertWords(req.user.id, planOf(req, me), items, language, nativeLanguage);
     if (!r.added) {
       return res.status(403).json({
         error: 'Достигнут лимит слов в словаре для вашего тарифа.', code: 'PLAN_LIMIT',
@@ -144,7 +144,7 @@ const generate = async (req, res) => {
 
     // Если словарь уже под завязку — не тратим ИИ-вызов зря
     const used = await VocabItem.count({ where: { userId: req.user.id } });
-    if (overLimit(res, 'student', me?.plan, 'vocab', used)) return;
+    if (overLimit(res, 'student', planOf(req, me), 'vocab', used)) return;
 
     if (await enforceAi(res, req.user.id, 'student')) return; // дневной лимит ИИ (429 если исчерпан)
 
@@ -159,7 +159,7 @@ const generate = async (req, res) => {
     const avoid = existing.map((v) => v.word);
 
     const words = await generateVocab({ language, nativeLanguage, topic, count, level, avoid });
-    const r = await insertWords(req.user.id, me?.plan, words, language, nativeLanguage);
+    const r = await insertWords(req.user.id, planOf(req, me), words, language, nativeLanguage);
 
     res.status(201).json({ data: r.created, meta: { generated: words.length, added: r.added, skipped: r.skipped } });
   } catch (err) {

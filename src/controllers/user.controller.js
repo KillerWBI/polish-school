@@ -248,7 +248,8 @@ const searchByUsername = async (req, res) => {
 
     const users = await User.findAll({
       where: {
-        role: 'student',
+        // Админу видны и админы — чтобы пригласить себя в свою группу и проверить кабинет ученика
+        role: req.user.isAdmin ? ['student', 'admin'] : 'student',
         [Op.or]: [
           { username: { [Op.iLike]: like } },
           { name:     { [Op.iLike]: like } },

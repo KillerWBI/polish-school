@@ -1,7 +1,7 @@
 const { Group, GroupStudent, User, Student, Lesson, Homework, HomeworkSubmission, Attendance, TeacherStudent } = require('../models');
 const { generateGroupLessons } = require('../utils/lessonGenerator');
 const { getStudentIdsForUser, resolveStudent, createPlaceholder } = require('../utils/students');
-const { overLimit } = require('../config/planLimits');
+const { overLimit, planOf } = require('../config/planLimits');
 
 const getAll = async (req, res) => {
   try {
@@ -32,7 +32,7 @@ const create = async (req, res) => {
     // Лимит тарифа на число групп
     const me = await User.findByPk(req.user.id, { attributes: ['plan'] });
     const usedGroups = await Group.count({ where: { teacherId: req.user.id } });
-    if (overLimit(res, 'teacher', me?.plan, 'groups', usedGroups)) return;
+    if (overLimit(res, 'teacher', planOf(req, me), 'groups', usedGroups)) return;
 
     const group = await Group.create({
       name,
@@ -187,7 +187,7 @@ const addPlaceholder = async (req, res) => {
     // Лимит тарифа на число учеников
     const me = await User.findByPk(req.user.id, { attributes: ['plan'] });
     const usedStudents = await Student.count({ where: { teacherId: req.user.id } });
-    if (overLimit(res, 'teacher', me?.plan, 'students', usedStudents)) return;
+    if (overLimit(res, 'teacher', planOf(req, me), 'students', usedStudents)) return;
 
     const student = await createPlaceholder(req.user.id, name, contact);
     await GroupStudent.create({ groupId: group.id, studentId: student.id });

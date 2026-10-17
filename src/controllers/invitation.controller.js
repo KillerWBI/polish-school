@@ -3,7 +3,7 @@ const { Invitation, Group, User, Student, GroupStudent, TeacherStudent } = requi
 const { resolveStudent } = require('../utils/students');
 const { createNotification } = require('../utils/notify');
 const { sendStudentInviteEmail } = require('../services/email');
-const { LIMITS } = require('../config/planLimits');
+const { LIMITS, planOf } = require('../config/planLimits');
 
 const USER_BRIEF = ['id', 'name', 'username', 'avatar'];
 
@@ -32,7 +32,7 @@ const create = async (req, res) => {
     if (group.teacherId !== req.user.id) return res.status(403).json({ error: 'Доступ запрещён' });
 
     const invitee = await User.findByPk(inviteeUserId);
-    if (!invitee || invitee.role !== 'student') {
+    if (!invitee || !['student', 'admin'].includes(invitee.role)) { // админ бывает и учеником
       return res.status(404).json({ error: 'Студент не найден' });
     }
 
@@ -198,7 +198,7 @@ const bulkInvite = async (req, res) => {
     // когда письма ушли и отозвать их нельзя.
     const usedStudents = await Student.count({ where: { teacherId: req.user.id } });
     const pendingCount = await Invitation.count({ where: { teacherId: req.user.id, status: 'pending' } });
-    let budget = remainingStudents(teacher?.plan, usedStudents + pendingCount);
+    let budget = remainingStudents(planOf(req, teacher), usedStudents + pendingCount);
 
     const results = [];
     for (const email of emails) {

@@ -3,7 +3,7 @@ const { Topic, Quiz, TrackSource, User } = require('../models');
 const { generateQuiz, generateRoadmap, gradeOpenAnswers, suggestSources, suggestSourcesForSteps } = require('../services/aiQuiz');
 const { buildRoadmap, stepTitleForAi } = require('../utils/roadmap');
 const { verifySources } = require('../utils/verifySources');
-const { overLimit } = require('../config/planLimits');
+const { overLimit, planOf } = require('../config/planLimits');
 const { enforceAi } = require('../utils/aiLimit');
 const { scoreQuiz } = require('../utils/quizScore');
 
@@ -91,7 +91,7 @@ const create = async (req, res) => {
     // Лимит числа треков + дневной лимит ИИ
     const me = await User.findByPk(req.user.id, { attributes: ['plan'] });
     const tracks = await Topic.count({ where: { userId: req.user.id } });
-    if (overLimit(res, 'student', me?.plan, 'tracks', tracks)) return;
+    if (overLimit(res, 'student', planOf(req, me), 'tracks', tracks)) return;
     if (await enforceAi(res, req.user.id, 'student')) return;
 
     let goal = null;

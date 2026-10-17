@@ -1,5 +1,5 @@
 const { StudentNote, User } = require('../models');
-const { overLimit } = require('../config/planLimits');
+const { overLimit, planOf } = require('../config/planLimits');
 
 // GET /notes — заметки ученика (фильтр ?lessonId= / ?individualLessonId=)
 const list = async (req, res) => {
@@ -21,7 +21,7 @@ const create = async (req, res) => {
   try {
     const me = await User.findByPk(req.user.id, { attributes: ['plan'] });
     const used = await StudentNote.count({ where: { userId: req.user.id } });
-    if (overLimit(res, 'student', me?.plan, 'notes', used)) return;
+    if (overLimit(res, 'student', planOf(req, me), 'notes', used)) return;
 
     const { lessonId, individualLessonId, title, text } = req.body;
     const note = await StudentNote.create({

@@ -1,6 +1,6 @@
 // Использование: router.get('/path', auth, isTeacher, controller)
 const isTeacher = (req, res, next) => {
-  if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
+  if (req.user.role !== 'teacher') {
     return res.status(403).json({ error: 'Только для учителя' });
   }
   next();
@@ -14,7 +14,7 @@ const isStudent = (req, res, next) => {
 };
 
 const isAdmin = (req, res, next) => {
-  if (req.user.role !== 'admin') {
+  if (!req.user.isAdmin) {
     return res.status(403).json({ error: 'Только для администратора' });
   }
   next();

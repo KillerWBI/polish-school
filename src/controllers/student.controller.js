@@ -3,7 +3,7 @@ const { QueryTypes, Op } = require('sequelize');
 const { Student, VocabItem, StudentLessonLog, Topic, Quiz, User } = require('../models');
 const { getStudentIdsForUser, createPlaceholder } = require('../utils/students');
 const { fetchChargesAndPayments } = require('./payment.controller');
-const { overLimit } = require('../config/planLimits');
+const { overLimit, planOf } = require('../config/planLimits');
 const { generateQuiz } = require('../services/aiQuiz');
 const { enforceAi } = require('../utils/aiLimit');
 // FK = список 6 таблиц, где лежит ученик (см. studentFkRegistry.js). Каждый элемент —
@@ -18,7 +18,7 @@ const create = async (req, res) => {
 
     const me = await User.findByPk(req.user.id, { attributes: ['plan'] });
     const usedStudents = await Student.count({ where: { teacherId: req.user.id } });
-    if (overLimit(res, 'teacher', me?.plan, 'students', usedStudents)) return;
+    if (overLimit(res, 'teacher', planOf(req, me), 'students', usedStudents)) return;
 
     const student = await createPlaceholder(req.user.id, name, contact);
     res.status(201).json({

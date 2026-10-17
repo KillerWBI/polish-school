@@ -167,11 +167,11 @@
 - `PATCH /admin/users/:id/deactivate` — `active=false` (нельзя деактивировать admin)
 - `PATCH /admin/users/:id/activate` — `active=true`
 - `PATCH /admin/users/:id/role` — смена роли (teacher/student/admin); нельзя понизить себя
-- `PATCH /admin/users/:id/plan` — смена тарифа (только для teacher); free/pro/school
+- `PATCH /admin/users/:id/plan` — смена тарифа (учитель и ученик — лимиты у ролей свои); free/basic/pro/school
 
 **Модель User:** добавлены поля `role: ENUM('teacher','student','admin')` + `active: BOOLEAN DEFAULT true` (миграция `20260709000002`). `auth.js` проверяет `active` при каждом запросе — деактивация немедленная без перелогина.
 
-**bootstrap:** `ADMIN_EMAIL` в `.env` → при старте `index.js` находит пользователя и повышает до admin. Первый admin создаётся так; следующих — через `/admin` → «Сменить роль».
+**bootstrap:** `ADMIN_EMAIL` в `.env` → при старте `index.js` снимает `admin` со всех остальных (→ `teacher`) и повышает пользователя из `ADMIN_EMAIL`. Админ ровно один. **Режим админа** (`X-Act-As`) и снятие лимитов — см. `ROLES.md`.
 
 **Файлы:** `admin.controller.js`, `admin.routes.js`
 

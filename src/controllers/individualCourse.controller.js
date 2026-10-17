@@ -1,7 +1,7 @@
 const { IndividualCourse, User, TeacherStudent, Student } = require('../models');
 const { generateIndividualLessons } = require('../utils/lessonGenerator');
 const { getStudentIdsForUser, resolveStudent, createPlaceholder } = require('../utils/students');
-const { overLimit } = require('../config/planLimits');
+const { overLimit, planOf } = require('../config/planLimits');
 
 // Ученик курса (Student.id) — чтобы фронт показывал имя (getStudent по /users/:id не годится: там User)
 const studentInclude = { model: Student, as: 'student', attributes: ['id', 'name', 'userId'] };
@@ -26,19 +26,19 @@ const create = async (req, res) => {
     // Лимит тарифа на число индивидуальных курсов
     const me = await User.findByPk(req.user.id, { attributes: ['plan'] });
     const usedCourses = await IndividualCourse.count({ where: { teacherId: req.user.id } });
-    if (overLimit(res, 'teacher', me?.plan, 'courses', usedCourses)) return;
+    if (overLimit(res, 'teacher', planOf(req, me), 'courses', usedCourses)) return;
 
     // Ученик курса — заглушка (placeholder) ИЛИ реальный аккаунт (studentId)
     let student;
     if (placeholder && placeholder.name) {
       // Заглушка — без гейта TeacherStudent, но под лимитом учеников (иначе он обходится)
       const usedStudents = await Student.count({ where: { teacherId: req.user.id } });
-      if (overLimit(res, 'teacher', me?.plan, 'students', usedStudents)) return;
+      if (overLimit(res, 'teacher', planOf(req, me), 'students', usedStudents)) return;
       student = await createPlaceholder(req.user.id, placeholder.name, placeholder.contact);
     } else {
       if (!studentId) return res.status(400).json({ error: 'Нужен studentId или placeholder' });
       const user = await User.findByPk(studentId);
-      if (!user || user.role !== 'student') {
+      if (!user || !['student', 'admin'].includes(user.role)) { // админ бывает и учеником
         return res.status(404).json({ error: 'Студент не найден' });
       }
       // Гейт: курс реальному ученику — только принятому. TeacherStudent — по User.id.

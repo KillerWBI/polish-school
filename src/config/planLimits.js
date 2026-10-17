@@ -21,8 +21,14 @@ const LABEL = {
   tracks: 'учебных треков', vocab: 'слов в словаре', notes: 'заметок',
 };
 
-const limitsFor = (role, plan) =>
-  (LIMITS[role] && LIMITS[role][plan]) || LIMITS[role]?.free || LIMITS.student.free;
+// Тариф «без лимитов» — только у админа (тестирует платформу). В БД его нет: подставляется в коде.
+const UNLIMITED = 'unlimited';
+
+const limitsFor = (role, plan) => {
+  const free = LIMITS[role]?.free || LIMITS.student.free;
+  if (plan === UNLIMITED) return Object.fromEntries(Object.keys(free).map(k => [k, Infinity]));
+  return (LIMITS[role] && LIMITS[role][plan]) || free;
+};
 const limitFor  = (role, plan, resource) => limitsFor(role, plan)[resource];
 
 // Если достигнут лимит по количеству — отправляет 403 и возвращает true (вызывающий делает `return`).
@@ -38,4 +44,7 @@ const overLimit = (res, role, plan, resource, used) => {
   return false;
 };
 
-module.exports = { LIMITS, limitsFor, limitFor, overLimit };
+// Тариф, по которому считать лимиты: админу — без лимитов, остальным — из БД (me = User с plan).
+const planOf = (req, me) => (req.user?.isAdmin ? UNLIMITED : me?.plan);
+
+module.exports = { LIMITS, UNLIMITED, limitsFor, limitFor, overLimit, planOf };

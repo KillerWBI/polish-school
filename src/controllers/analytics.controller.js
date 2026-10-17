@@ -82,7 +82,7 @@ const getTeacherAnalytics = async (req, res) => {
 
     // Проверим, что юзер существует и это учитель
     const teacher = await User.findOne({
-      where: { id: teacherId, role: 'teacher' },
+      where: { id: teacherId, role: ['teacher', 'admin'] }, // админ работает и как учитель
       attributes: ['id'],
     });
     if (!teacher) return res.status(404).json({ error: 'Учитель не найден' });
@@ -291,7 +291,7 @@ const getStudentAnalytics = async (req, res) => {
 
     // Студент существует и это student?
     const student = await User.findOne({
-      where: { id: userId, role: 'student' },
+      where: { id: userId, role: ['student', 'admin'] }, // админ работает и как ученик
       attributes: ['id'],
     });
     if (!student) return res.status(404).json({ error: 'Студент не найден' });
