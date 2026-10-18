@@ -619,10 +619,16 @@ GET /users/@ivan_petrov/profile
 ```json
 // POST /ai/quiz — Body (Zod quizSchema)
 { "topic": "Дроби", "count": 5, "difficulty": "medium", "type": "single", "language": "русский" }
-// type ∈ single|multiple|truefalse|open. Response 200:
+// type ∈ single|multiple|truefalse|open|mixed. Response 200:
 { "data": { "topic","type",..., "questions": [ { "question","options":[],"answer":[0],"sampleAnswer","explanation" } ] } }
 // answer — индексы правильных вариантов с 0. ИИ присылает ТЕКСТ варианта, индекс находит сервер
 // (normalizeQuestions в services/aiQuiz.js); вопрос с неоднозначным ответом в ответ не попадает.
+// mixed — смешанный тест, тип у вопроса:
+//   { "kind":"single", "question","options":[…],"answer":[0],"explanation" }
+//   { "kind":"exact",  "question","options":[],"answer":[],"accepted":["25%","25"],"explanation" }
+// accepted — допустимые формы ОДНОГО ответа, засчитывается любая (utils/quizScore.exactMatch:
+// регистр, ё/е, ударение, запятая/точка, пробелы в числах и перед единицей, концевая пунктуация).
+// Вопросы без kind (старые тесты) считаются по type теста. POST /quizzes принимает kind/accepted.
 
 // POST /quizzes — Body: { topic, type, difficulty?, language?, questions:[...] } → 201 { data: <Quiz> }
 ```

@@ -184,7 +184,8 @@ const next = async (req, res) => {
     if (!topic) return res.status(404).json({ error: 'Тема не найдена' });
 
     const { stepId } = req.body || {};
-    const type = req.body?.type === 'open' ? 'open' : 'single'; // тип практики: тест или открытый ответ
+    // Тип практики: открытый ответ (оценивает ИИ) или смешанный тест — варианты + «впишите ответ»
+    const type = req.body?.type === 'open' ? 'open' : 'mixed';
     const step = findStep(topic.roadmap, stepId);
     if (!step) return res.status(400).json({ error: 'Шаг не найден' });
 
@@ -238,6 +239,8 @@ const attempt = async (req, res) => {
 
     // Считаем результат сами по ответам — присланный клиентом score не берём:
     // он напрямую двигает обладание темой (EMA) и виден учителю в слабых местах.
+    // Тип — у каждого вопроса (kind); 'single' — для попыток старых практик без kind
+    // Тип — у каждого вопроса (kind); 'single' — для попыток старых практик без kind
     const { score, total } = scoreQuiz(questions, answers, 'single');
     if (!total) return res.status(400).json({ error: 'Нет вопросов' });
 
@@ -246,7 +249,7 @@ const attempt = async (req, res) => {
       teacherId: req.user.id, // владелец = проходивший
       topicId: topic.id,
       stepId,
-      topic: topic.title, type: 'single', difficulty, language: 'русский',
+      topic: topic.title, type: questions.some((q) => q?.kind) ? 'mixed' : 'single', difficulty, language: 'русский',
       questions, answers: answers || {}, score, total,
     });
 

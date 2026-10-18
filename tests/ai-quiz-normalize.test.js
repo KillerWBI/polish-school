@@ -59,3 +59,29 @@ describe('Разбор ответа ИИ при генерации теста', 
     expect(normalizeQuestions(list, 'single')).toHaveLength(1);
   });
 });
+
+describe('Смешанный тест: разбор ответа ИИ', () => {
+  test('single и exact в одном тесте, у каждого свой kind', () => {
+    const qs = normalizeQuestions([
+      { kind: 'single', question: 'Сколько?', options: ['20%', '5%', '50%', '0,2%'], answer: ['20%'] },
+      { kind: 'exact', question: '45 от 180 — сколько процентов?', accepted: ['25%', ' 25 ', '25%'], explanation: '45 ÷ 180' },
+    ], 'mixed');
+    expect(qs[0]).toMatchObject({ kind: 'single', answer: [0] });
+    expect(qs[1]).toEqual({ kind: 'exact', question: '45 от 180 — сколько процентов?', options: [], answer: [],
+      accepted: ['25%', '25'], explanation: '45 ÷ 180', sampleAnswer: '' });
+  });
+
+  test('exact без accepted, но с answer-строками — берём их как допустимые формы', () => {
+    const [q] = normalizeQuestions([{ kind: 'exact', question: 'Столица Франции?', answer: ['Париж'] }], 'mixed');
+    expect(q.accepted).toEqual(['Париж']);
+  });
+
+  test('exact без единой формы ответа отбрасывается', () => {
+    expect(normalizeQuestions([{ kind: 'exact', question: 'q', accepted: ['', '  '] }], 'mixed')).toEqual([]);
+  });
+
+  test('неизвестный kind в смешанном тесте → вопрос с вариантами', () => {
+    const [q] = normalizeQuestions([{ kind: 'weird', question: 'q', options: ['a', 'b'], answer: ['b'] }], 'mixed');
+    expect(q).toMatchObject({ kind: 'single', answer: [1] });
+  });
+});

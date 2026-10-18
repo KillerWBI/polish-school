@@ -427,7 +427,7 @@ const generateTargetedQuiz = async (req, res) => {
       topic: subtitles.join('; '),
       count,
       difficulty: 'medium',
-      type: 'single',
+      type: 'mixed', // варианты-ловушки + «впишите ответ»: проверяет знание, а не угадывание
       language: 'русский',
     });
 
@@ -435,7 +435,7 @@ const generateTargetedQuiz = async (req, res) => {
     const quiz = await Quiz.create({
       teacherId,
       topic: label.slice(0, 255),
-      type: 'single',
+      type: 'mixed',
       difficulty: 'medium',
       language: 'русский',
       questions,

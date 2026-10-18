@@ -4,6 +4,8 @@
 //   AI_BASE_URL — базовый URL (по умолчанию Groq)
 //   AI_MODEL    — модель (по умолчанию openai/gpt-oss-120b на Groq; пробуется первой)
 // Сменить провайдера (Gemini/OpenRouter/Together/локальный Ollama) = поменять эти 3 строки в .env.
+const { normAnswer } = require('../utils/quizScore');
+
 const DEFAULT_BASE_URL = 'https://api.groq.com/openai/v1';
 // ⚠️ 2026-10: Groq снял llama-3.3-70b-versatile — все ИИ-функции падали с «model does not exist».
 // Поэтому модели теперь цепочкой: если провайдер ответил «модели нет», берём следующую,
@@ -30,6 +32,10 @@ const isModelGone = (status, json) => {
 // gpt-oss — «думающие» модели: рассуждение расходует max_tokens. Держим его коротким
 // и добавляем запас, иначе JSON обрезается на середине.
 const isReasoningModel = (model) => /gpt-oss/i.test(model);
+// Сколько токенов добавить на рассуждение — чем выше effort, тем длиннее модель думает.
+// medium на тест из 6 вопросов тратил ~1 450 токенов ответа вместе с рассуждением. Запас не раздуваем:
+// провайдер может резервировать весь max_tokens из минутного лимита ключа (8 000 у бесплатного Groq).
+const REASONING_BUDGET = { low: 1500, medium: 2500 };
 
 // answer — ТЕКСТ правильного варианта, а не индекс: с индексом модель путала счёт с 0 и с 1
 // («20%» — второй вариант → писала 2 → у нас это третий, 25%). Индекс находит сервер (normalizeQuestions).
@@ -38,23 +44,52 @@ const TYPE_HINT = {
   multiple:  '4–5 разных вариантов, несколько правильных; answer — ТЕКСТЫ всех правильных вариантов, дословно как в options',
   truefalse: 'варианты строго ["Верно","Неверно"]; answer — ["Верно"] или ["Неверно"]',
   open:      'без вариантов (options: []), answer: []; добавь поле sampleAnswer с образцом ответа',
+  mixed:     `смешанный тест, у каждого вопроса поле kind:
+  • kind "single" — ровно 4 разных варианта, один правильный; answer — массив с ТЕКСТОМ правильного варианта, дословно как в options;
+  • kind "exact" — вопрос «впишите ответ» без вариантов (options: []): ответ короткий и ОДНОЗНАЧНЫЙ — число, термин, имя, дата, формула;
+    accepted — ВСЕ допустимые формы записи этого ответа (например ["25%","25","25 процентов"]);
+    если ответ — число с единицей, в accepted обязательно и само число без единицы ("30 Н" → ["30 Н","30"]).
+    Не задавай как exact вопросы, ответ на которые можно сформулировать по-разному или длиннее 3–4 слов`,
 };
+
+// Доля вопросов «впишите ответ» в смешанном тесте: на сложном их больше — угадать нельзя.
+const EXACT_SHARE = { easy: 'примерно треть', medium: 'примерно 40%', hard: 'примерно половина' };
+
+// Что значит уровень. Одним словом «hard» модель давала те же вопросы на воспроизведение.
+const DIFFICULTY_HINT = {
+  easy:   'лёгкая — проверка базовых понятий и определений',
+  medium: 'средняя — применение правила к новой ситуации, а не пересказ определения',
+  hard:   'сложная — задачи в 2–3 шага рассуждения, сочетание нескольких правил, частные случаи и исключения',
+};
+
+// Ложные варианты. Без этого правила модель давала заведомо абсурдные варианты — ответ угадывался
+// без знания темы (30 от 150: «20%» против «3000%» и «-5%»).
+const DISTRACTOR_RULES = `Неправильные варианты — правдоподобные ловушки из ТИПИЧНЫХ ошибок по этой теме
+(перепутан порядок действий, не та единица, пропущен шаг, частая путаница понятий).
+Они той же формы, длины и точности, что правильный; заведомо абсурдных и «шуточных» вариантов нет.
+Правильный вариант не выделяется формулировкой и стоит на случайном месте.
+Варианты не равны друг другу в другой записи (−12/5 и −2,4 — один и тот же ответ).`;
 
 const buildPrompt = ({ topic, count, difficulty, type, language, avoid }) => {
   // avoid — тексты недавних вопросов, чтобы ИИ не повторял их (адаптивная практика).
   const avoidBlock = Array.isArray(avoid) && avoid.length
     ? `\nНЕ повторяй и не перефразируй эти уже заданные вопросы (придумай новые по той же теме):\n${avoid.map((q) => `- ${q}`).join('\n')}\n`
     : '';
+  const hasOptions = type === 'single' || type === 'multiple' || type === 'mixed';
+  const schema = type === 'mixed'
+    ? '{"questions":[{"kind":"single","question":"...","options":["..."],"explanation":"...","answer":["текст правильного варианта"]},{"kind":"exact","question":"...","options":[],"explanation":"...","accepted":["ответ","другая форма записи"]}]}'
+    : '{"questions":[{"question":"...","options":["..."],"explanation":"...","answer":["текст правильного варианта"],"sampleAnswer":""}]}';
   return `Составь учебный тест для любого предмета.
 Тема: "${topic}".
 Язык теста: ${language}.
 Количество вопросов: ${count}.
-Сложность: ${difficulty}.
-Тип вопросов: ${TYPE_HINT[type]}.
-${avoidBlock}
+Сложность: ${DIFFICULTY_HINT[difficulty] || difficulty}.
+Тип вопросов: ${TYPE_HINT[type]}.${type === 'mixed' ? `\nВопросов kind "exact" — ${EXACT_SHARE[difficulty] || EXACT_SHARE.medium}, остальные kind "single"; чередуй их.` : ''}
+${hasOptions ? `${DISTRACTOR_RULES}\n` : ''}${avoidBlock}
 Верни СТРОГО валидный JSON без markdown, без текста вокруг, по схеме:
-{"questions":[{"question":"...","options":["..."],"explanation":"...","answer":["текст правильного варианта"],"sampleAnswer":""}]}
-- explanation — краткое пояснение правильного ответа (1–2 предложения); answer обязан с ним совпадать.
+${schema}
+- Сначала РЕШИ каждый вопрос сам. explanation — это краткое решение (1–2 предложения, с вычислением, если оно есть); answer${type === 'mixed' ? ' и accepted обязаны' : ' обязан'} следовать из этого решения. Убедись, что верный ответ ровно один.
+- Формулы и выражения — обычным текстом (x² + 3x = 0, 3/4, √2), без LaTeX и markdown.
 - Ничего, кроме JSON, не выводи.`;
 };
 
@@ -63,32 +98,52 @@ const norm = (s) => String(s ?? '').trim().toLowerCase();
 // Приводим вопросы от ИИ к хранимому формату { answer: [индексы с 0] }. Ответ ИИ — тексты вариантов;
 // вопрос отбрасывается, если ответ не находится среди вариантов однозначно (лучше на вопрос
 // меньше, чем неверный ключ: от него зависят баллы, обладание темой и оценки у учителя).
+// Смешанный тест: у каждого вопроса свой kind — 'exact' (вписать ответ) или 'single' (варианты).
+// Любой другой kind от ИИ считаем вопросом с вариантами — он отсеется, если вариантов нет.
 const normalizeQuestions = (questions, type) => (Array.isArray(questions) ? questions : [])
   .map((q) => {
-    const question = String(q?.question ?? '').trim();
-    if (!question) return null;
-    const base = {
-      question,
-      sampleAnswer: String(q.sampleAnswer ?? ''),
-      explanation: String(q.explanation ?? ''),
-    };
-    if (type === 'open') return { ...base, options: [], answer: [] };
-
-    const options = (Array.isArray(q.options) ? q.options : []).map((o) => String(o).trim());
-    const keys = options.map(norm);
-    if (options.length < 2 || keys.some((k) => !k) || new Set(keys).size !== keys.length) return null;
-    if (type === 'truefalse' && options.length !== 2) return null;
-
-    // Число в answer не принимаем: неизвестно, считала модель с 0 или с 1.
-    const given = Array.isArray(q.answer) ? q.answer : [];
-    if (!given.length || given.some((a) => typeof a !== 'string')) return null;
-    const answer = [...new Set(given.map((a) => keys.indexOf(norm(a))))];
-    if (answer.includes(-1)) return null;
-    if (type !== 'multiple' && answer.length !== 1) return null;
-
-    return { ...base, options, answer: answer.sort((a, b) => a - b) };
+    if (type !== 'mixed') return normalizeQuestion(q, type);
+    const kind = q?.kind === 'exact' ? 'exact' : 'single';
+    const one = normalizeQuestion(q, kind);
+    return one && { kind, ...one };
   })
   .filter(Boolean);
+
+const normalizeQuestion = (q, type) => {
+  const question = String(q?.question ?? '').trim();
+  if (!question) return null;
+  const base = {
+    question,
+    sampleAnswer: String(q.sampleAnswer ?? ''),
+    explanation: String(q.explanation ?? ''),
+  };
+  if (type === 'open') return { ...base, options: [], answer: [] };
+
+  // Точный ответ: все допустимые формы одного ответа. ИИ иногда кладёт их в answer — берём оттуда.
+  if (type === 'exact') {
+    const forms = Array.isArray(q.accepted) && q.accepted.length ? q.accepted : q.answer;
+    const seen = new Set();
+    const accepted = (Array.isArray(forms) ? forms : [])
+      .filter((a) => typeof a === 'string' || typeof a === 'number')
+      .map((a) => String(a).trim())
+      .filter((a) => a && !seen.has(normAnswer(a)) && seen.add(normAnswer(a)));
+    return accepted.length ? { ...base, sampleAnswer: '', options: [], answer: [], accepted } : null;
+  }
+
+  const options = (Array.isArray(q.options) ? q.options : []).map((o) => String(o).trim());
+  const keys = options.map(norm);
+  if (options.length < 2 || keys.some((k) => !k) || new Set(keys).size !== keys.length) return null;
+  if (type === 'truefalse' && options.length !== 2) return null;
+
+  // Число в answer не принимаем: неизвестно, считала модель с 0 или с 1.
+  const given = Array.isArray(q.answer) ? q.answer : [];
+  if (!given.length || given.some((a) => typeof a !== 'string')) return null;
+  const answer = [...new Set(given.map((a) => keys.indexOf(norm(a))))];
+  if (answer.includes(-1)) return null;
+  if (type !== 'multiple' && answer.length !== 1) return null;
+
+  return { ...base, options, answer: answer.sort((a, b) => a - b) };
+};
 
 // Достаём JSON даже если модель обернула его в ```json ... ``` или добавила текст.
 const extractJson = (text) => {
@@ -99,7 +154,7 @@ const extractJson = (text) => {
 };
 
 // Один запрос к AI-провайдеру с ожиданием JSON в ответе. Возвращает распарсенный объект.
-const chatJSON = async ({ user, maxTokens = 3000, temperature = 0.7 }) => {
+const chatJSON = async ({ user, maxTokens = 3000, temperature = 0.7, effort = 'low' }) => {
   const apiKey = process.env.AI_API_KEY;
   if (!apiKey) {
     const err = new Error('AI не настроен');
@@ -121,9 +176,9 @@ const chatJSON = async ({ user, maxTokens = 3000, temperature = 0.7 }) => {
         },
         body: JSON.stringify({
           model,
-          max_tokens: reasoning ? maxTokens + 1500 : maxTokens,
+          max_tokens: reasoning ? maxTokens + REASONING_BUDGET[effort] : maxTokens,
           temperature,
-          ...(reasoning ? { reasoning_effort: 'low' } : {}),
+          ...(reasoning ? { reasoning_effort: effort } : {}),
           messages: [
             { role: 'system', content: 'Ты — помощник преподавателя. Отвечай только валидным JSON.' },
             { role: 'user', content: user },
@@ -157,7 +212,13 @@ const chatJSON = async ({ user, maxTokens = 3000, temperature = 0.7 }) => {
 };
 
 const generateQuiz = async (params) => {
-  const parsed = await chatJSON({ user: buildPrompt(params) });
+  // Насколько долго модель думает. На low она ошибалась в самом ключе сложных задач (замер 2026-10-18:
+  // «доход 120 000 под 7% за 9 мес.» → отмечено 5 600 вместо 6 300) — неверный ключ хуже лёгкого теста.
+  // medium + правило «сначала реши» в промпте: в замерах 18/18 ключей верны, ~2 100 токенов, ~4–13 с.
+  // high точнее на многошаговых задачах, но ~9 500 токенов на тест — больше всего минутного лимита
+  // бесплатного Groq (8 000 TPM на ключ, общий для всех пользователей): на проде был бы сплошной 429.
+  // Перейти на high имеет смысл только на платном тарифе провайдера.
+  const parsed = await chatJSON({ user: buildPrompt(params), effort: 'medium' });
   const questions = normalizeQuestions(parsed.questions, params.type);
   if (!questions.length) {
     throw new Error('AI вернул некорректную структуру теста');

@@ -3,10 +3,14 @@ const { z } = require('zod');
 // POST /quizzes — сохранить сгенерированный тест.
 const createQuizSchema = z.object({
   topic:      z.string().trim().min(1, 'Нужна тема').max(200),
-  type:       z.enum(['single', 'multiple', 'truefalse', 'open']).default('single'),
+  type:       z.enum(['single', 'multiple', 'truefalse', 'open', 'mixed']).default('single'),
   difficulty: z.string().trim().max(20).optional(),
   language:   z.string().trim().max(40).optional(),
   questions: z.array(z.object({
+    // Смешанный тест: тип у вопроса и допустимые формы точного ответа. Без них в схеме
+    // z.object вырезал бы поля, и вопрос «впишите ответ» сохранился бы без ответа.
+    kind:         z.enum(['single', 'exact']).optional(),
+    accepted:     z.array(z.string()).optional(),
     question:     z.string(),
     options:      z.array(z.string()).optional(),
     answer:       z.array(z.number()).optional(),
