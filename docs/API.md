@@ -852,6 +852,8 @@ GET /users/@ivan_petrov/profile
 | POST | `/topics/:id/next` | ✅ | student | Сгенерировать практику по шагу (Body `{stepId, type?}` — `single` тест / `open` открытый ответ); сложность по mastery, анти-повтор |
 | POST | `/topics/:id/attempt` | ✅ | student | Записать результат теста (Body `{stepId,questions,answers,score,total,difficulty}`) → EMA |
 | POST | `/topics/:id/grade-open` | ✅ | student | ИИ-оценка открытых ответов (Body `{stepId,questions,answers,difficulty}`) → `{results:[{score,feedback}],avg,score,total,topic}`; сохраняет попытку `type=open`, EMA |
+| GET | `/topics/:id/theory/:stepId` | ✅ | student | Сохранённая теория подтемы → `{summary, sections:[{title,text,points}], examples:[{task,solution}], mistakes}` или `null` (ещё не писалась) |
+| POST | `/topics/:id/theory` | ✅ | student | Написать теорию подтемы ИИ (Body `{stepId}`) и сохранить навсегда (`TrackTheory`, уникально на подтему). Уже есть — отдаёт сохранённую, лимит ИИ не тратит |
 | GET | `/topics/:id/sources` | ✅ | student | Сохранённые источники трека (`?stepId=`) — видны на странице темы под шагом |
 | POST | `/topics/:id/sources` | ✅ | student | Подобрать источники к шагу (Body `{stepId, loose?}`) — ИИ (с анти-повтором avoid) → проверка существования (Google Books/GET-ссылки) → **сохраняет и возвращает новые, не больше 2 за запрос**. `loose=true` — добавляет «менее проверенные» (`verified:false`) |
 | POST | `/topics/:id/sources/module` | ✅ | student | Подобрать источники **ко всем подтемам модуля** (Body `{moduleId}`) — один вызов ИИ (ответ размечен номером подтемы) → проверка по каждой подтеме параллельно → сохраняет под `stepId` своей подтемы (не больше 2 на подтему), возвращает новые |

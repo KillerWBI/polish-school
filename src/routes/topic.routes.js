@@ -1,5 +1,5 @@
 const router = require('express').Router();
-const { createTopic, submitAttempt, generateCards, reviewCard, gradeOpen, sourcesReq, moduleSourcesReq, cardsFromText, shareTopic } = require('../schemas/topic.schema');
+const { createTopic, submitAttempt, generateCards, reviewCard, gradeOpen, theoryReq, sourcesReq, moduleSourcesReq, cardsFromText, shareTopic } = require('../schemas/topic.schema');
 const { validate } = require('../middleware/validate');
 const auth = require('../middleware/auth');
 const { isStudent } = require('../middleware/role');
@@ -16,6 +16,8 @@ router.patch('/:id/share',  auth, isStudent, validate(shareTopic), ctrl.share);
 router.post('/:id/next',    auth, isStudent, aiRateLimit, ctrl.next);
 router.post('/:id/attempt', auth, isStudent, validate(submitAttempt), ctrl.attempt);
 router.post('/:id/grade-open', auth, isStudent, aiRateLimit, validate(gradeOpen), ctrl.gradeOpen);
+router.get('/:id/theory/:stepId',     auth, isStudent, ctrl.theoryGet);
+router.post('/:id/theory',            auth, isStudent, aiRateLimit, validate(theoryReq), ctrl.theoryCreate); // ИИ, один раз на подтему
 router.get('/:id/sources',            auth, isStudent, ctrl.sourcesList);
 router.post('/:id/sources',           auth, isStudent, aiRateLimit, validate(sourcesReq), ctrl.sources);
 router.post('/:id/sources/module',    auth, isStudent, aiRateLimit, validate(moduleSourcesReq), ctrl.moduleSources); // все подтемы модуля, 1 вызов ИИ

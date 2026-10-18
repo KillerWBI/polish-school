@@ -23,6 +23,7 @@ const Notification = require('./Notification');
 const Topic = require('./Topic');
 const TrackCard = require('./TrackCard');
 const TrackSource = require('./TrackSource');
+const TrackTheory = require('./TrackTheory');
 
 // Group ↔ User (teacher)
 Group.belongsTo(User, { foreignKey: 'teacherId', as: 'teacher' });
@@ -139,6 +140,10 @@ Invoice.hasMany(PaymentRecord, { foreignKey: 'invoiceId', as: 'payments' });
 Topic.hasMany(TrackSource, { foreignKey: 'topicId', as: 'sources', onDelete: 'CASCADE' });
 TrackSource.belongsTo(Topic, { foreignKey: 'topicId', as: 'topic' });
 
+// TrackTheory ↔ Topic (теория к шагам трека, каскад)
+Topic.hasMany(TrackTheory, { foreignKey: 'topicId', as: 'theories', onDelete: 'CASCADE' });
+TrackTheory.belongsTo(Topic, { foreignKey: 'topicId', as: 'topic' });
+
 module.exports = {
   User,
   Group,
@@ -163,6 +168,7 @@ module.exports = {
   Topic,
   TrackCard,
   TrackSource,
+  TrackTheory,
   Invoice,
   PushSubscription,
 };

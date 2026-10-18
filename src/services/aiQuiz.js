@@ -323,6 +323,44 @@ const LINKS_HINT = `Ссылки — прежде всего статьи Вик
 (каждая ссылка — отдельное понятие, термин, закон, личность или событие), затем официальная документация и
 крупнейшие учебные ресурсы. Адреса небольших сайтов не угадывай.`;
 
+// Приводим теорию от ИИ к хранимому виду. Хранится навсегда — пустые и битые части отбрасываем.
+// null — сохранять нечего (нет ни одного раздела с содержанием).
+const str = (v) => (typeof v === 'string' || typeof v === 'number' ? String(v).trim() : '');
+const normalizeTheory = (raw) => {
+  const list = (v) => (Array.isArray(v) ? v : []);
+  const sections = list(raw?.sections)
+    .map((s) => ({ title: str(s?.title), text: str(s?.text), points: list(s?.points).map(str).filter(Boolean) }))
+    .filter((s) => s.title && (s.text || s.points.length));
+  if (!sections.length) return null;
+  return {
+    summary: str(raw?.summary),
+    sections,
+    examples: list(raw?.examples).map((e) => ({ task: str(e?.task), solution: str(e?.solution) })).filter((e) => e.task && e.solution),
+    mistakes: list(raw?.mistakes).map(str).filter(Boolean),
+  };
+};
+
+// Теория к подтеме — всё важное, что нужно знать: понятия, правила, разобранные примеры, ошибки.
+// Генерируется при первом открытии подтемы и хранится (TrackTheory) — ~2 000 токенов один раз,
+// а не при создании трека: 15–30 подтем сразу не помещаются в минутный лимит провайдера.
+const generateTheory = async ({ title, subject, language = 'русский' }) => {
+  const prompt = `Напиши учебную теорию по подтеме "${title}"${subject ? ` (предмет: ${subject})` : ''}.
+Язык: ${language}. Это главный материал для самостоятельного изучения: дай всё важное по подтеме, а не пересказ в двух строках.
+- summary — о чём подтема и зачем она нужна (2–3 предложения).
+- sections — 3–6 разделов: ключевые понятия и определения, правила, формулы, закономерности, частные случаи.
+  У раздела: title, text (связное объяснение, 2–5 предложений) и points (короткие ключевые факты или формулы).
+- examples — 2–3 разобранных примера: task (условие) и solution (решение по шагам).
+- mistakes — 3–5 типичных ошибок и как их избежать.
+Сначала проверь каждое утверждение и вычисление — ошибка в теории хуже её отсутствия.
+Формулы и выражения — обычным текстом (x² + 3x = 0, 3/4, √2), без LaTeX и markdown.
+Верни СТРОГО валидный JSON без текста вокруг, по схеме:
+{"summary":"...","sections":[{"title":"...","text":"...","points":["..."]}],"examples":[{"task":"...","solution":"..."}],"mistakes":["..."]}`;
+  const parsed = await chatJSON({ user: prompt, maxTokens: 3500, temperature: 0.4, effort: 'medium' });
+  const theory = normalizeTheory(parsed);
+  if (!theory) throw new Error('ИИ вернул пустую теорию, попробуйте ещё раз');
+  return theory;
+};
+
 // Предложить источники (книги + ссылки) для изучения подтемы. Существование проверяется отдельно.
 // avoid — уже показанные (названия/URL), чтобы «подобрать ещё» давало НОВЫЕ.
 const suggestSources = async ({ title, subject, language = 'русский', avoid = [] }) => {
@@ -433,4 +471,4 @@ ${avoidBlock}Верни СТРОГО валидный JSON без markdown, бе
   return words;
 };
 
-module.exports = { generateQuiz, normalizeQuestions, generateRoadmap, generateFlashcards, generateFlashcardsFromText, gradeOpenAnswers, suggestSources, suggestSourcesForSteps, generateVocab };
+module.exports = { generateQuiz, normalizeQuestions, generateRoadmap, generateTheory, normalizeTheory, generateFlashcards, generateFlashcardsFromText, gradeOpenAnswers, suggestSources, suggestSourcesForSteps, generateVocab };

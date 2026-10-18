@@ -1,6 +1,6 @@
 const crypto = require('crypto');
-const { Topic, Quiz, TrackSource, User } = require('../models');
-const { generateQuiz, generateRoadmap, gradeOpenAnswers, suggestSources, suggestSourcesForSteps } = require('../services/aiQuiz');
+const { Topic, Quiz, TrackSource, TrackTheory, User } = require('../models');
+const { generateQuiz, generateRoadmap, generateTheory, gradeOpenAnswers, suggestSources, suggestSourcesForSteps } = require('../services/aiQuiz');
 const { buildRoadmap, stepTitleForAi } = require('../utils/roadmap');
 const { verifySources } = require('../utils/verifySources');
 const { overLimit, planOf } = require('../config/planLimits');
@@ -315,6 +315,54 @@ const gradeOpen = async (req, res) => {
   }
 };
 
+// GET /topics/:id/theory/:stepId — сохранённая теория подтемы или null (ещё не писалась)
+const theoryGet = async (req, res) => {
+  try {
+    const topic = await Topic.findOne({ where: { id: req.params.id, userId: req.user.id }, attributes: ['id'] });
+    if (!topic) return res.status(404).json({ error: 'Тема не найдена' });
+    const row = await TrackTheory.findOne({ where: { topicId: topic.id, stepId: req.params.stepId } });
+    res.json({ data: row ? row.content : null });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Ошибка получения теории' });
+  }
+};
+
+// POST /topics/:id/theory — написать теорию подтемы (ИИ) и сохранить навсегда. Body { stepId }.
+// Уже есть — отдаём сохранённую, лимит ИИ не тратим.
+const theoryCreate = async (req, res) => {
+  try {
+    const topic = await Topic.findOne({ where: { id: req.params.id, userId: req.user.id } });
+    if (!topic) return res.status(404).json({ error: 'Тема не найдена' });
+    const { stepId } = req.body;
+    const step = findStep(topic.roadmap, stepId);
+    if (!step) return res.status(400).json({ error: 'Шаг не найден' });
+
+    const where = { topicId: topic.id, stepId };
+    const existing = await TrackTheory.findOne({ where });
+    if (existing) return res.json({ data: existing.content });
+
+    if (await enforceAi(res, req.user.id, 'student')) return; // дневной лимит ИИ
+
+    const content = await generateTheory({ title: stepTitleForAi(topic.title, step), subject: topic.subject, language: 'русский' });
+    try {
+      await TrackTheory.create({ ...where, userId: req.user.id, content });
+      res.status(201).json({ data: content });
+    } catch (e) {
+      // Две вкладки открыли подтему одновременно: уникальный индекс пустил только одну запись — отдаём её
+      if (e.name !== 'SequelizeUniqueConstraintError') throw e;
+      const row = await TrackTheory.findOne({ where });
+      res.json({ data: row.content });
+    }
+  } catch (err) {
+    if (err.code === 'NO_AI_KEY') {
+      return res.status(503).json({ error: 'AI не настроен: добавьте AI_API_KEY в .env бэкенда' });
+    }
+    console.error('topic.theoryCreate:', err.message);
+    res.status(502).json({ error: err.message || 'Не удалось подготовить теорию' });
+  }
+};
+
 // GET /topics/:id/sources — сохранённые источники трека (?stepId= фильтр)
 const sourcesList = async (req, res) => {
   try {
@@ -441,4 +489,4 @@ const removeSource = async (req, res) => {
   }
 };
 
-module.exports = { list, getOne, create, remove, share, next, attempt, gradeOpen, sources, moduleSources, sourcesList, removeSource };
+module.exports = { list, getOne, create, remove, share, next, attempt, gradeOpen, theoryGet, theoryCreate, sources, moduleSources, sourcesList, removeSource };
