@@ -799,7 +799,7 @@ GET /users/@ivan_petrov/profile
 | Method | Path | Auth | Role | Описание |
 |--------|------|------|------|----------|
 | GET | `/vocab` | ✅ | student | Словарь (фильтр `?status=`, пагинация) + `meta.counts` |
-| GET | `/vocab/due` | ✅ | student | Слова к повторению сегодня (SR) |
+| GET | `/vocab/due` | ✅ | student | Слова к повторению сегодня (SR). `?language=<ISO>` / `?language=none` — только этот язык (лимит 50 — внутри языка). `meta.languages: [{ language, count }]` — сколько к повторению по каждому языку |
 | POST | `/vocab` | ✅ | student | Добавить слово |
 | PUT | `/vocab/:id` | ✅ | student | Редактировать |
 | PATCH | `/vocab/:id/review` | ✅ | student | Результат повторения `{correct}` (SR-интервал) |

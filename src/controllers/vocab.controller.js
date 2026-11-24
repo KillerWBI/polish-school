@@ -50,19 +50,33 @@ const list = async (req, res) => {
   }
 };
 
-// GET /vocab/due — слова к повторению сегодня (nextReviewAt <= now), кроме known
+// GET /vocab/due — слова к повторению сегодня (nextReviewAt <= now), кроме known.
+// ?language=<ISO> — только этот язык, ?language=none — слова без языка.
+// meta.languages — [{ language, count }] к повторению по каждому языку (без фильтра, для выбора).
 const due = async (req, res) => {
   try {
+    const dueWhere = {
+      userId: req.user.id,
+      status: { [Op.ne]: 'known' },
+      nextReviewAt: { [Op.lte]: new Date() },
+    };
+    const where = { ...dueWhere };
+    if (req.query.language === 'none') where.language = null;
+    else if (req.query.language)        where.language = req.query.language;
+
     const rows = await VocabItem.findAll({
-      where: {
-        userId: req.user.id,
-        status: { [Op.ne]: 'known' },
-        nextReviewAt: { [Op.lte]: new Date() },
-      },
+      where,
       order: [['nextReviewAt', 'ASC']],
       limit: 50,
     });
-    res.json({ data: rows });
+    const langRows = await VocabItem.findAll({
+      where: dueWhere,
+      attributes: ['language', [VocabItem.sequelize.fn('COUNT', VocabItem.sequelize.col('id')), 'count']],
+      group: ['language'],
+      raw: true,
+    });
+    const languages = langRows.map((r) => ({ language: r.language, count: Number(r.count) }));
+    res.json({ data: rows, meta: { languages } });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Ошибка получения слов к повторению' });

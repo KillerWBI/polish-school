@@ -68,7 +68,7 @@ const session = async (req, res) => {
         context: c.topic?.title || 'Учебный трек',
       })),
       ...words.map((w) => ({
-        id: w.id, kind: 'vocab', front: w.word, back: w.translation,
+        id: w.id, kind: 'vocab', front: w.word, back: w.translation, language: w.language,
         context: w.example ? `Словарь · ${w.example}` : 'Словарь',
       })),
     ].slice(0, SESSION_CAP);
